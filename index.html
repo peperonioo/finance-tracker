@@ -31,8 +31,18 @@
   .stat .val .sub{display:block}
   .stat.inflow .val{color:var(--green)}
   .stat.outflow .val{color:var(--warn)}
-  .stat.earned .val{color:var(--lime)}
+  .stat.sold .val{color:var(--lime)}
+  .stat.collected .val{color:var(--green)}
+  .stat.pending .val{color:var(--warn)}
   .stat.returned .val{color:var(--red)}
+  .totals.tri{grid-template-columns:1fr 1fr 1fr}
+  .totals.tri .stat{padding:11px 9px}
+  .totals.tri .val{font-size:16px}
+  #totals .group-lbl{margin:14px 0 8px}
+  #totals .group-lbl:first-child{margin-top:4px}
+  #totals .totals{margin:0 0 6px}
+  .chk{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--ink);margin:2px 0 12px;cursor:pointer;user-select:none}
+  .chk input{margin:0;accent-color:var(--lime);width:18px;height:18px}
 
   .group-lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:22px 0 10px;display:flex;align-items:center;gap:8px}
   .group-lbl::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -113,7 +123,7 @@
   <h1>Ventas y deudas</h1>
 </header>
 
-<div class="totals" id="totals"></div>
+<div id="totals"></div>
 <div id="app"><div class="loading">Cargando…</div></div>
 
 <div class="addbtns">
@@ -136,6 +146,7 @@
   <input id="s_buyer" placeholder="Comprador" autocomplete="off">
   <div id="itemRows"></div>
   <button class="quick" onclick="addItemRow()">+ añadir artículo</button>
+  <label class="chk"><input type="checkbox" id="s_paid"> Ya cobrada (al contado)</label>
   <div class="dlg-actions">
     <button class="btn cancel" onclick="dlgSale.close()">Cancelar</button>
     <button class="btn" onclick="saveSale()">Guardar</button>
@@ -256,6 +267,12 @@ function sumPaidByCurrency(list){
   list.forEach(e=>{ const p=paid(e); if(p>0){ m[e.currency]=(m[e.currency]||0)+p; } });
   return m;
 }
+// Valor total facturado/vendido (cobrado + pendiente), por moneda.
+function sumSoldByCurrency(list){
+  const m={};
+  list.forEach(e=>{ const t=principal(e); if(t>0){ m[e.currency]=(m[e.currency]||0)+t; } });
+  return m;
+}
 function currencyHTML(m){
   const keys=Object.keys(m);
   if(!keys.length) return `<span class="sub">—</span>`;
@@ -267,16 +284,23 @@ function render(){
   const debts = entries.filter(e=>e.type==="debt");
 
   document.getElementById("totals").innerHTML = `
-    <div class="stat inflow"><div class="lbl">Me deben</div><div class="val">${currencyHTML(sumByCurrency(sales))}</div></div>
-    <div class="stat outflow"><div class="lbl">Debo</div><div class="val">${currencyHTML(sumByCurrency(debts))}</div></div>
-    <div class="stat earned"><div class="lbl">Cobrado (total)</div><div class="val">${currencyHTML(sumPaidByCurrency(sales))}</div></div>
-    <div class="stat returned"><div class="lbl">Devuelto (total)</div><div class="val">${currencyHTML(sumPaidByCurrency(debts))}</div></div>
+    <div class="group-lbl">Ventas</div>
+    <div class="totals tri">
+      <div class="stat sold"><div class="lbl">Vendido</div><div class="val">${currencyHTML(sumSoldByCurrency(sales))}</div></div>
+      <div class="stat collected"><div class="lbl">Cobrado</div><div class="val">${currencyHTML(sumPaidByCurrency(sales))}</div></div>
+      <div class="stat pending"><div class="lbl">Me deben</div><div class="val">${currencyHTML(sumByCurrency(sales))}</div></div>
+    </div>
+    <div class="group-lbl">Deudas</div>
+    <div class="totals">
+      <div class="stat outflow"><div class="lbl">Debo</div><div class="val">${currencyHTML(sumByCurrency(debts))}</div></div>
+      <div class="stat returned"><div class="lbl">Devuelto</div><div class="val">${currencyHTML(sumPaidByCurrency(debts))}</div></div>
+    </div>
   `;
 
   document.getElementById("app").innerHTML = `
-    <div class="group-lbl">Me deben</div>
-    ${sales.length ? sales.map(card).join("") : `<div class="empty">Sin ventas pendientes.</div>`}
-    <div class="group-lbl">Debo</div>
+    <div class="group-lbl">Ventas</div>
+    ${sales.length ? sales.map(card).join("") : `<div class="empty">Sin ventas todavía.</div>`}
+    <div class="group-lbl">Deudas</div>
     ${debts.length ? debts.map(card).join("") : `<div class="empty">Sin deudas. 🎉</div>`}
   `;
 }
@@ -329,7 +353,8 @@ function card(e){
       <div class="addpay">
         <input id="pin-${e.id}" type="number" inputmode="decimal" placeholder="Importe (${cur})">
         <button class="btn" onclick="addPay('${e.id}')">${payLabel}</button>
-      </div>${quick}`}
+      </div>
+      <button class="quick" onclick="markPaidFull('${e.id}')">✓ ${e.type==="sale"?"marcar como cobrada":"marcar como saldada"}</button>${quick}`}
     </div>
   </div>`;
 }
@@ -342,6 +367,12 @@ async function addPay(id){
   await save(); render();
 }
 async function quickPay(id,amt){ const e=entries.find(x=>x.id===id); e.payments.push({amount:amt,date:today()}); e._open=true; await save(); render(); }
+async function markPaidFull(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const bal=balance(e); if(bal<=0) return;
+  e.payments.push({amount:bal,date:today()}); e._open=true;
+  await save(); render();
+}
 async function delPay(id,pi){ const e=entries.find(x=>x.id===id); e.payments.splice(pi,1); e._open=true; await save(); render(); }
 
 /* edición de nombres / importes */
@@ -394,6 +425,7 @@ async function editPrincipal(id){
 function openNew(type){
   if(type==="sale"){
     document.getElementById("s_buyer").value="";
+    document.getElementById("s_paid").checked=false;
     document.getElementById("itemRows").innerHTML="";
     addItemRow(); addItemRow();
     dlgSale.showModal();
@@ -414,7 +446,11 @@ async function saveSale(){
   if(!buyer){ document.getElementById("s_buyer").focus(); return; }
   const items=[...document.querySelectorAll("#itemRows .item-row")].map(r=>({name:r.querySelector(".iname").value.trim(),price:parseFloat(r.querySelector(".iprice").value)||0})).filter(i=>i.name);
   if(!items.length) return;
-  entries.unshift({id:"s-"+Date.now(),type:"sale",party:buyer,date:today(),currency:"AUD",items,payments:[],_open:true});
+  // venta al contado: se siembra con un pago por el total (queda "cobrada")
+  const paidNow = document.getElementById("s_paid").checked;
+  const total = items.reduce((a,i)=>a+(+i.price||0),0);
+  const payments = (paidNow && total>0) ? [{amount:total,date:today()}] : [];
+  entries.unshift({id:"s-"+Date.now(),type:"sale",party:buyer,date:today(),currency:"AUD",items,payments,_open:true});
   await save(); render(); dlgSale.close();
 }
 async function saveDebt(){
