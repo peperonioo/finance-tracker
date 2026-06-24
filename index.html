@@ -83,6 +83,13 @@
   .edit-btn:hover .ed{color:var(--lime)}
   .who-edit{color:inherit}
   .row-right{display:flex;align-items:baseline;gap:8px}
+  /* coste / ganancia (solo en el desglose de cada venta) */
+  .row.cost{color:var(--dim);border-bottom:none}
+  .row.profit{font-weight:800;border-top:1px solid var(--line);margin-top:2px;padding-top:10px;border-bottom:none}
+  .profit-pos{color:var(--lime)}
+  .profit-neg{color:var(--red)}
+  .add-cost{font-size:12px;color:var(--dim);background:none;border:none;cursor:pointer;padding:8px 0 2px;font-weight:600}
+  .add-cost:hover{color:var(--lime)}
   .balance-line{display:flex;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:15px;font-weight:700}
   .balance-line .amt{color:var(--warn)}
   .balance-line.cleared .amt{color:var(--green)}
@@ -91,7 +98,7 @@
   .addpay input:focus{outline:none;border-color:var(--lime)}
   .btn{background:var(--lime);color:#111;border:none;border-radius:9px;font-weight:700;font-size:14px;padding:0 16px;cursor:pointer}
   .btn:active{transform:translateY(1px)}
-  .quick{font-size:12px;color:var(--lime);background:none;border:none;cursor:pointer;padding:8px 0 0;font-weight:600}
+  .quick{display:block;font-size:12px;color:var(--lime);background:none;border:none;cursor:pointer;padding:8px 0 0;font-weight:600;text-align:left}
   .addbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
   .btn.ghost{background:none;color:var(--dim);border:1px dashed var(--line);padding:13px}
   .btn.ghost:hover{color:var(--lime);border-color:var(--lime)}
@@ -177,6 +184,7 @@
   <input id="s_buyer" placeholder="Comprador" autocomplete="off">
   <div id="itemRows"></div>
   <button class="quick" onclick="addItemRow()">+ añadir artículo</button>
+  <input id="s_cost" type="number" inputmode="decimal" placeholder="Pagué por todo (coste, opcional)">
   <label class="chk"><input type="checkbox" id="s_paid"> Ya cobrada (al contado)</label>
   <div class="dlg-actions">
     <button class="btn cancel" onclick="dlgSale.close()">Cancelar</button>
@@ -365,7 +373,17 @@ function card(e,i){
       </div>`
     ).join("")
     + `<button class="quick" onclick="addItemTo('${e.id}')">+ añadir artículo</button>`
-    + `<div class="row total"><span>Total</span><span class="mono">${money(tot,cur)}</span></div>`;
+    + `<div class="row total"><span>Total vendido</span><span class="mono">${money(tot,cur)}</span></div>`;
+    // coste / ganancia — solo en el desglose, opcional
+    const cost = +e.cost || 0;
+    if(cost>0){
+      const profit = tot - cost;
+      const profitStr = (profit<0?"−":"") + money(Math.abs(profit),cur);
+      detail += `<div class="row cost"><span>Pagué (coste)</span><button class="edit-btn mono" onclick="editCost('${e.id}')" title="Editar coste">${money(cost,cur)}<span class="ed">✎</span></button></div>`
+        + `<div class="row profit"><span>Ganancia</span><span class="mono ${profit>=0?'profit-pos':'profit-neg'}">${profitStr}</span></div>`;
+    } else {
+      detail += `<button class="add-cost" onclick="editCost('${e.id}')">+ añadir coste / ganancia</button>`;
+    }
   } else {
     detail = `<div class="row"><span>Prestado</span><button class="edit-btn mono" onclick="editPrincipal('${e.id}')" title="Editar importe">${money(tot,cur)}<span class="ed">✎</span></button></div>`;
   }
@@ -463,11 +481,20 @@ async function editPrincipal(id){
   if(isNaN(n)||n<=0){ alert("Importe no válido."); return; }
   e.principal=n; e._open=true; await save(); render();
 }
+async function editCost(id){
+  const e=entries.find(x=>x.id===id); if(!e||e.type!=="sale") return;
+  const v=prompt("¿Cuánto pagaste por esta venta? (coste, 0 = quitar):", e.cost||"");
+  if(v===null) return;
+  const n=parseFloat(v);
+  e.cost = (isNaN(n)||n<0) ? 0 : n;
+  e._open=true; await save(); render();
+}
 
 /* nueva venta */
 function openNew(type){
   if(type==="sale"){
     document.getElementById("s_buyer").value="";
+    document.getElementById("s_cost").value="";
     document.getElementById("s_paid").checked=false;
     document.getElementById("itemRows").innerHTML="";
     addItemRow(); addItemRow();
@@ -493,8 +520,9 @@ async function saveSale(){
   const paidNow = document.getElementById("s_paid").checked;
   const total = items.reduce((a,i)=>a+(+i.price||0),0);
   const payments = (paidNow && total>0) ? [{amount:total,date:today()}] : [];
+  const cost = parseFloat(document.getElementById("s_cost").value)||0;
   const id="s-"+Date.now();
-  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:"AUD",items,payments,_open:true});
+  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:"AUD",items,payments,cost,_open:true});
   await save(); render(); dlgSale.close(); pulse(id);
 }
 async function saveDebt(){
