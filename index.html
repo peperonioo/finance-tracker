@@ -31,6 +31,8 @@
   .stat .val .sub{display:block}
   .stat.inflow .val{color:var(--green)}
   .stat.outflow .val{color:var(--warn)}
+  .stat.earned .val{color:var(--lime)}
+  .stat.returned .val{color:var(--red)}
 
   .group-lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:22px 0 10px;display:flex;align-items:center;gap:8px}
   .group-lbl::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -62,6 +64,15 @@
   .pay-del{background:none;border:none;color:#555;font-size:16px;cursor:pointer;padding:0 4px;line-height:1}
   .pay-del:hover{color:#c0564b}
   .nopay{font-size:13px;color:var(--dim);font-style:italic;padding:4px 0}
+  /* botones de edición inline (renombrar / editar precio / importe) */
+  .edit-btn{background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:inherit;font-weight:inherit;font-family:inherit;text-align:left}
+  .edit-btn.mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+  .edit-btn.free{color:var(--lime);font-size:11px;font-weight:700;letter-spacing:.08em}
+  .edit-btn:hover{color:var(--lime)}
+  .edit-btn .ed{color:var(--dim);font-size:11px;margin-left:5px}
+  .edit-btn:hover .ed{color:var(--lime)}
+  .who-edit{color:inherit}
+  .row-right{display:flex;align-items:baseline;gap:8px}
   .balance-line{display:flex;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:15px;font-weight:700}
   .balance-line .amt{color:var(--warn)}
   .balance-line.cleared .amt{color:var(--green)}
@@ -239,6 +250,12 @@ function sumByCurrency(list){
   list.forEach(e=>{ const b=balance(e); if(b>0){ m[e.currency]=(m[e.currency]||0)+b; } });
   return m;
 }
+// Dinero realmente movido (suma de pagos), por moneda — para el tracker de finanzas.
+function sumPaidByCurrency(list){
+  const m={};
+  list.forEach(e=>{ const p=paid(e); if(p>0){ m[e.currency]=(m[e.currency]||0)+p; } });
+  return m;
+}
 function currencyHTML(m){
   const keys=Object.keys(m);
   if(!keys.length) return `<span class="sub">—</span>`;
@@ -252,6 +269,8 @@ function render(){
   document.getElementById("totals").innerHTML = `
     <div class="stat inflow"><div class="lbl">Me deben</div><div class="val">${currencyHTML(sumByCurrency(sales))}</div></div>
     <div class="stat outflow"><div class="lbl">Debo</div><div class="val">${currencyHTML(sumByCurrency(debts))}</div></div>
+    <div class="stat earned"><div class="lbl">Cobrado (total)</div><div class="val">${currencyHTML(sumPaidByCurrency(sales))}</div></div>
+    <div class="stat returned"><div class="lbl">Devuelto (total)</div><div class="val">${currencyHTML(sumPaidByCurrency(debts))}</div></div>
   `;
 
   document.getElementById("app").innerHTML = `
@@ -269,11 +288,19 @@ function card(e){
 
   let detail;
   if(e.type==="sale"){
-    detail = e.items.map(i=>
-      `<div class="row"><span>${esc(i.name)}</span>${i.price>0?`<span class="mono">${money(i.price,cur)}</span>`:`<span class="free">GRATIS</span>`}</div>`
-    ).join("") + `<div class="row total"><span>Total</span><span class="mono">${money(tot,cur)}</span></div>`;
+    detail = e.items.map((i,idx)=>
+      `<div class="row">
+        <button class="edit-btn" onclick="renameItem('${e.id}',${idx})" title="Renombrar artículo">${esc(i.name)}<span class="ed">✎</span></button>
+        <span class="row-right">
+          <button class="edit-btn mono${i.price>0?'':' free'}" onclick="editItemPrice('${e.id}',${idx})" title="Editar precio">${i.price>0?money(i.price,cur):'GRATIS'}</button>
+          <button class="pay-del" onclick="delItem('${e.id}',${idx})" title="Quitar artículo">×</button>
+        </span>
+      </div>`
+    ).join("")
+    + `<button class="quick" onclick="addItemTo('${e.id}')">+ añadir artículo</button>`
+    + `<div class="row total"><span>Total</span><span class="mono">${money(tot,cur)}</span></div>`;
   } else {
-    detail = `<div class="row"><span>Prestado</span><span class="mono">${money(tot,cur)}</span></div>`;
+    detail = `<div class="row"><span>Prestado</span><button class="edit-btn mono" onclick="editPrincipal('${e.id}')" title="Editar importe">${money(tot,cur)}<span class="ed">✎</span></button></div>`;
   }
 
   const pays = e.payments.length
@@ -289,7 +316,7 @@ function card(e){
   <div class="card ${flow} ${e._open?'expanded':''}">
     <div class="head" onclick="toggle('${e.id}')">
       <span class="chev">▶</span>
-      <div class="who">${esc(e.party)}<span class="date">${niceDate(e.date)}</span></div>
+      <div class="who"><button class="edit-btn who-edit" onclick="event.stopPropagation();renameEntry('${e.id}')" title="Renombrar">${esc(e.party)}<span class="ed">✎</span></button><span class="date">${niceDate(e.date)}</span></div>
       <span class="pill ${cleared?'done':'open'}">${pillTxt}</span>
     </div>
     <div class="progress"><div style="width:${pct}%"></div></div>
@@ -316,6 +343,52 @@ async function addPay(id){
 }
 async function quickPay(id,amt){ const e=entries.find(x=>x.id===id); e.payments.push({amount:amt,date:today()}); e._open=true; await save(); render(); }
 async function delPay(id,pi){ const e=entries.find(x=>x.id===id); e.payments.splice(pi,1); e._open=true; await save(); render(); }
+
+/* edición de nombres / importes */
+async function renameEntry(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=prompt(e.type==="sale"?"Nombre del comprador:":"¿A quién le debes?:", e.party);
+  if(v===null) return;
+  const t=v.trim(); if(!t) return;
+  e.party=t; e._open=true; await save(); render();
+}
+async function renameItem(id,idx){
+  const e=entries.find(x=>x.id===id); if(!e||!e.items[idx]) return;
+  const v=prompt("Nombre del artículo:", e.items[idx].name);
+  if(v===null) return;
+  const t=v.trim(); if(!t) return;
+  e.items[idx].name=t; e._open=true; await save(); render();
+}
+async function editItemPrice(id,idx){
+  const e=entries.find(x=>x.id===id); if(!e||!e.items[idx]) return;
+  const v=prompt("Precio (0 = gratis):", e.items[idx].price);
+  if(v===null) return;
+  const n=parseFloat(v);
+  e.items[idx].price = (isNaN(n)||n<0) ? 0 : n;
+  e._open=true; await save(); render();
+}
+async function addItemTo(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const name=prompt("Nombre del artículo:"); if(name===null) return;
+  const t=name.trim(); if(!t) return;
+  const pv=prompt("Precio (0 = gratis):","0"); if(pv===null) return;
+  const n=parseFloat(pv);
+  e.items.push({name:t, price:(isNaN(n)||n<0)?0:n});
+  e._open=true; await save(); render();
+}
+async function delItem(id,idx){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  if(e.items.length<=1){ alert("Una venta necesita al menos un artículo. Edítalo en vez de borrarlo."); return; }
+  e.items.splice(idx,1); e._open=true; await save(); render();
+}
+async function editPrincipal(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=prompt("Importe prestado:", e.principal);
+  if(v===null) return;
+  const n=parseFloat(v);
+  if(isNaN(n)||n<=0){ alert("Importe no válido."); return; }
+  e.principal=n; e._open=true; await save(); render();
+}
 
 /* nueva venta */
 function openNew(type){
