@@ -393,7 +393,12 @@ function card(e,i){
     : `<div class="nopay">${e.type==="sale"?"Aún sin pagos.":"Aún no has devuelto nada."}</div>`;
 
   const balLabel = e.type==="sale" ? (cleared?"Cobrado":"Te debe") : (cleared?"Saldado":"Debes");
-  const pillTxt = cleared ? (e.type==="sale"?"COBRADO":"SALDADO") : money(bal,cur);
+  // aunque esté cobrado/saldado, mostramos el importe (cuánto recibiste/devolviste)
+  const pillTxt = cleared ? ("✓ "+money(tot,cur)) : money(bal,cur);
+  // bajo el nombre: primer artículo (+ cuántos más) en las ventas
+  const itemHint = (e.type==="sale" && e.items.length)
+    ? esc(e.items[0].name) + (e.items.length>1 ? ` +${e.items.length-1}` : "") + " · "
+    : "";
   const payLabel = e.type==="sale" ? "Cobrar" : "Pagar";
   const quick = e.id==="tristan" ? `<button class="quick" onclick="quickPay('${e.id}',100)">+ pago semanal de 100</button>` : "";
 
@@ -401,7 +406,7 @@ function card(e,i){
   <div class="card ${flow} ${e._open?'expanded':''}" data-id="${e.id}"${inAnim(i)}>
     <div class="head" onclick="toggle('${e.id}')">
       <span class="chev">▶</span>
-      <div class="who"><button class="edit-btn who-edit" onclick="event.stopPropagation();renameEntry('${e.id}')" title="Renombrar">${esc(e.party)}<span class="ed">✎</span></button><span class="date">${niceDate(e.date)}</span></div>
+      <div class="who"><button class="edit-btn who-edit" onclick="event.stopPropagation();renameEntry('${e.id}')" title="Renombrar">${esc(e.party)}<span class="ed">✎</span></button><span class="date">${itemHint}${niceDate(e.date)}</span></div>
       <span class="pill ${cleared?'done':'open'}">${pillTxt}</span>
     </div>
     <div class="progress"><div style="width:${pct}%"></div></div>
