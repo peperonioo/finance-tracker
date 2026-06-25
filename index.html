@@ -114,6 +114,11 @@
   dialog h2{font-size:17px;margin-bottom:14px}
   dialog input,dialog select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--ink);padding:10px 12px;font-size:15px;margin-bottom:8px}
   dialog input:focus,dialog select:focus{outline:none;border-color:var(--lime)}
+  dialog textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--ink);padding:10px 12px;font-size:15px;margin-bottom:8px;font-family:inherit;resize:vertical;line-height:1.4}
+  dialog textarea:focus{outline:none;border-color:var(--lime)}
+  .hint{font-size:12.5px;color:var(--dim);margin-bottom:10px;line-height:1.4}
+  .imp-sep{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:4px 0 10px}
+  .btn.ghost.wide{width:100%;margin-top:8px;padding:13px}
   .item-row{display:flex;gap:6px}
   .item-row input.iname{flex:2}
   .item-row input.iprice{flex:1}
@@ -174,6 +179,7 @@
   <button class="btn ghost" onclick="openNew('sale')">+ Venta</button>
   <button class="btn ghost" onclick="openNew('debt')">+ Deuda</button>
 </div>
+<button class="btn ghost wide" onclick="openImport()">✨ Importar de texto o foto</button>
 
 <div class="backup">
   <button class="lnk" onclick="exportData()">↓ Exportar copia</button>
@@ -211,6 +217,23 @@
   </div>
 </dialog>
 
+<dialog id="dlgImport">
+  <h2>✨ Importar</h2>
+  <div id="imp_step1">
+    <p class="hint">Pega un texto o sube una foto (recibo, lista, nota). Detecta artículos e importes; tú revisas antes de crear. El OCR de fotos funciona mejor con texto claro/impreso.</p>
+    <label class="btn ghost wide" style="margin-top:0">📷 Foto / recibo
+      <input type="file" id="imp_file" accept="image/*" hidden>
+    </label>
+    <textarea id="imp_text" rows="5" placeholder="…o pega aquí el texto. Una línea por artículo, ej:&#10;Guitarra 200&#10;Bajo 90&#10;Akai 100"></textarea>
+    <div id="imp_status" class="hint"></div>
+    <div class="dlg-actions">
+      <button class="btn cancel" onclick="dlgImport.close()">Cancelar</button>
+      <button class="btn" onclick="impAnalyze()">Analizar</button>
+    </div>
+  </div>
+  <div id="imp_step2" style="display:none"></div>
+</dialog>
+
 <!-- diálogo genérico de edición/confirmación (sustituye a prompt/confirm,
      poco fiables dentro de una PWA instalada en iOS) -->
 <dialog id="dlgEdit">
@@ -228,6 +251,7 @@ let introMode = false; // entrada escalonada solo en la primera carga
 const dlgSale = document.getElementById("dlgSale");
 const dlgDebt = document.getElementById("dlgDebt");
 const dlgEdit = document.getElementById("dlgEdit");
+const dlgImport = document.getElementById("dlgImport");
 
 /* Diálogo propio (reemplaza prompt/confirm/alert, poco fiables en PWA iOS).
    askEdit → texto/número | askConfirm → sí/no | notify → solo aviso. */
@@ -649,6 +673,112 @@ function importData(input){
   };
   reader.readAsText(file);
 }
+
+/* ——— importar inteligente (texto pegado o foto con OCR gratis) ——— */
+let impItems = [];
+function openImport(){
+  impItems = [];
+  document.getElementById("imp_text").value = "";
+  document.getElementById("imp_status").textContent = "";
+  document.getElementById("imp_step2").style.display = "none";
+  document.getElementById("imp_step2").innerHTML = "";
+  document.getElementById("imp_step1").style.display = "";
+  dlgImport.showModal();
+}
+// Heurística: una línea por artículo; el último número de la línea es el precio.
+function impParse(text){
+  return (text||"").split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
+    const nums = line.match(/\d[\d.,]*/g);
+    let price = 0, name = line;
+    if(nums && nums.length){
+      const tok = nums[nums.length-1];
+      let raw = tok.replace(/[.,](?=\d{3}\b)/g,"").replace(",", ".");
+      const n = parseFloat(raw);
+      if(!isNaN(n)){
+        price = n;
+        name = line.slice(0, line.lastIndexOf(tok)).replace(/(A\$|US\$|[$€£])\s*$/,"").replace(/[-–—:·•=x×]+\s*$/i,"").trim();
+        if(!name) name = line.replace(tok,"").replace(/(A\$|US\$|[$€£])/g,"").trim();
+      }
+    }
+    return { name: name.replace(/\s{2,}/g," ").trim(), price };
+  }).filter(it=>it.name);
+}
+function impAnalyze(){
+  impItems = impParse(document.getElementById("imp_text").value);
+  if(!impItems.length){
+    document.getElementById("imp_status").textContent = "No detecté artículos. Escribe una línea por artículo, ej: Guitarra 200";
+    return;
+  }
+  renderImpPreview();
+}
+function renderImpPreview(){
+  const step2 = document.getElementById("imp_step2");
+  step2.innerHTML = `
+    <div class="imp-sep">Revisa y edita antes de crear (${impItems.length})</div>
+    <input id="imp_buyer" placeholder="Comprador (¿a quién?)" autocomplete="off">
+    <div id="imp_rows"></div>
+    <button class="quick" onclick="impAddRow()">+ añadir línea</button>
+    <div class="dlg-actions">
+      <button class="btn cancel" onclick="impBack()">Atrás</button>
+      <button class="btn" onclick="impCreate()">Crear venta</button>
+    </div>`;
+  const rows = document.getElementById("imp_rows");
+  rows.innerHTML = impItems.map((it,i)=>`<div class="item-row" data-i="${i}">
+      <input class="iname" placeholder="Artículo">
+      <input class="iprice" type="number" inputmode="decimal" placeholder="$">
+      <button class="pay-del" title="Quitar">×</button>
+    </div>`).join("");
+  [...rows.querySelectorAll(".item-row")].forEach(row=>{
+    const i = +row.dataset.i;
+    const n = row.querySelector(".iname"), p = row.querySelector(".iprice"), d = row.querySelector(".pay-del");
+    n.value = impItems[i].name; p.value = impItems[i].price || "";
+    n.oninput = () => impItems[i].name = n.value;
+    p.oninput = () => impItems[i].price = parseFloat(p.value) || 0;
+    d.onclick = () => { impItems.splice(i,1); renderImpPreview(); };
+  });
+  document.getElementById("imp_step1").style.display = "none";
+  step2.style.display = "";
+}
+function impAddRow(){ impItems.push({name:"",price:0}); renderImpPreview(); }
+function impBack(){
+  document.getElementById("imp_step2").style.display = "none";
+  document.getElementById("imp_step1").style.display = "";
+}
+async function impCreate(){
+  const buyer = (document.getElementById("imp_buyer").value||"").trim() || "Sin nombre";
+  const items = impItems.map(i=>({name:(i.name||"").trim(), price:+i.price||0})).filter(i=>i.name);
+  if(!items.length){ await notify("No hay artículos con nombre."); return; }
+  const id = "s-"+Date.now();
+  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:"AUD",items,payments:[],_open:true});
+  await save(); render(); dlgImport.close(); pulse(id);
+}
+// OCR gratis con Tesseract.js (se carga bajo demanda desde CDN; necesita internet)
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  return new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    s.onload=res; s.onerror=()=>rej(new Error("no-load"));
+    document.head.appendChild(s);
+  });
+}
+document.getElementById("imp_file").addEventListener("change", async (ev)=>{
+  const file = ev.target.files[0]; ev.target.value=""; if(!file) return;
+  const status = document.getElementById("imp_status");
+  status.textContent = "Cargando lector de texto…";
+  try{
+    await loadTesseract();
+    status.textContent = "Leyendo la foto… 0%";
+    const { data } = await Tesseract.recognize(file, "spa+eng", {
+      logger: m => { if(m.status==="recognizing text") status.textContent = "Leyendo la foto… "+Math.round(m.progress*100)+"%"; }
+    });
+    const txt = (data && data.text || "").trim();
+    document.getElementById("imp_text").value = txt;
+    status.textContent = txt ? "Texto detectado — revísalo y pulsa Analizar." : "No pude leer texto en la foto. Prueba otra o escríbelo.";
+  }catch(err){
+    status.textContent = "No se pudo procesar la foto (¿sin conexión?). Puedes pegar el texto a mano.";
+  }
+});
 
 /* empezar de cero */
 async function startEmpty(){
