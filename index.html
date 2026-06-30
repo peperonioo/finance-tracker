@@ -43,6 +43,10 @@
   #totals .totals{margin:0 0 6px}
   .chk{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--ink);margin:2px 0 12px;cursor:pointer;user-select:none}
   .chk input{margin:0;accent-color:var(--lime);width:18px;height:18px}
+  .curlbl{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--dim);margin:2px 0 10px}
+  .curlbl select{width:auto;flex:1;margin:0}
+  .cur-edit{background:none;border:none;cursor:pointer;padding:0;font-family:inherit;font-size:11px;color:var(--dim);letter-spacing:.04em;margin-top:10px}
+  .cur-edit:hover{color:var(--lime)}
 
   .group-lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:22px 0 10px;display:flex;align-items:center;gap:8px}
   .group-lbl::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -196,6 +200,7 @@
   <input id="s_buyer" placeholder="Comprador" autocomplete="off">
   <div id="itemRows"></div>
   <button class="quick" onclick="addItemRow()">+ añadir artículo</button>
+  <label class="curlbl">Moneda <select id="s_cur" class="cur-select"></select></label>
   <label class="chk"><input type="checkbox" id="s_paid"> Ya cobrada (al contado)</label>
   <div class="dlg-actions">
     <button class="btn cancel" onclick="dlgSale.close()">Cancelar</button>
@@ -209,7 +214,7 @@
   <input id="d_concept" placeholder="¿Qué es? (opcional: préstamo, alquiler…)" autocomplete="off">
   <div class="two">
     <input id="d_amount" type="number" inputmode="decimal" placeholder="Importe que debes">
-    <select id="d_cur"><option value="AUD">AUD</option><option value="EUR">EUR</option><option value="USD">USD</option></select>
+    <select id="d_cur" class="cur-select"></select>
   </div>
   <div class="dlg-actions">
     <button class="btn cancel" onclick="dlgDebt.close()">Cancelar</button>
@@ -239,6 +244,7 @@
 <dialog id="dlgEdit">
   <h2 id="ed_title"></h2>
   <input id="ed_input" autocomplete="off">
+  <select id="ed_select" style="display:none"></select>
   <div class="dlg-actions">
     <button class="btn cancel" id="ed_cancel">Cancelar</button>
     <button class="btn" id="ed_ok">Guardar</button>
@@ -261,6 +267,7 @@ function askEdit(title, value="", opts={}){
   return new Promise(resolve=>{
     edResolve = resolve;
     document.getElementById("ed_title").textContent = title;
+    document.getElementById("ed_select").style.display = "none";
     const inp = document.getElementById("ed_input");
     inp.style.display = "";
     inp.type = opts.number ? "number" : "text";
@@ -272,11 +279,25 @@ function askEdit(title, value="", opts={}){
     setTimeout(()=>{ try{ inp.focus(); inp.select(); }catch(e){} }, 40);
   });
 }
+function askChoose(title, options, current){
+  return new Promise(resolve=>{
+    edResolve = resolve;
+    document.getElementById("ed_title").textContent = title;
+    document.getElementById("ed_input").style.display = "none";
+    const sel = document.getElementById("ed_select");
+    sel.style.display = "";
+    sel.innerHTML = options.map(o=>`<option value="${o}"${o===current?" selected":""}>${o}</option>`).join("");
+    document.getElementById("ed_ok").textContent = "Guardar";
+    document.getElementById("ed_cancel").style.display = "";
+    dlgEdit.showModal();
+  });
+}
 function askConfirm(title, ok="Sí"){
   return new Promise(resolve=>{
     edResolve = resolve;
     document.getElementById("ed_title").textContent = title;
     document.getElementById("ed_input").style.display = "none";
+    document.getElementById("ed_select").style.display = "none";
     document.getElementById("ed_ok").textContent = ok;
     document.getElementById("ed_cancel").style.display = "";
     dlgEdit.showModal();
@@ -287,6 +308,7 @@ function notify(title){
     edResolve = resolve;
     document.getElementById("ed_title").textContent = title;
     document.getElementById("ed_input").style.display = "none";
+    document.getElementById("ed_select").style.display = "none";
     document.getElementById("ed_ok").textContent = "OK";
     document.getElementById("ed_cancel").style.display = "none";
     dlgEdit.showModal();
@@ -294,7 +316,9 @@ function notify(title){
 }
 document.getElementById("ed_ok").onclick = () => {
   const inp = document.getElementById("ed_input");
-  edClose(inp.style.display==="none" ? true : inp.value);
+  const sel = document.getElementById("ed_select");
+  if(sel.style.display !== "none") edClose(sel.value);
+  else edClose(inp.style.display==="none" ? true : inp.value);
 };
 document.getElementById("ed_cancel").onclick = () => edClose(null);
 dlgEdit.addEventListener("cancel", (ev)=>{ ev.preventDefault(); edClose(null); }); // ESC / gesto atrás
@@ -311,7 +335,9 @@ function pulse(id){
 const fmt = n => Math.round(n).toLocaleString("en-AU");
 const today = () => new Date().toISOString().slice(0,10);
 const niceDate = iso => { const [y,m,d]=iso.split("-"); return `${d}/${m}/${y.slice(2)}`; };
-const sym = c => c==="EUR"?"€":c==="USD"?"US$":"A$";
+const CURRENCIES = ["AUD","USD","EUR","GBP","NZD","CAD","MXN","COP","ARS","BRL","CLP","JPY"];
+const SYMBOLS = {AUD:"A$",USD:"US$",EUR:"€",GBP:"£",NZD:"NZ$",CAD:"C$",MXN:"MX$",COP:"COP$",ARS:"AR$",BRL:"R$",CLP:"CLP$",JPY:"¥"};
+const sym = c => SYMBOLS[c] || ((c||"")+" ");
 const money = (n,c) => sym(c)+fmt(n);
 const esc = t => (t+"").replace(/[<>&]/g,x=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[x]));
 
@@ -514,6 +540,7 @@ function card(e,i){
     <div class="progress"><div style="width:${pct}%"></div></div>
     <div class="body">
       ${detail}
+      <button class="cur-edit" onclick="editCurrency('${e.id}')" title="Cambiar moneda">Moneda: ${e.currency||'AUD'} ✎</button>
       <div class="section-lbl">${e.type==="sale"?"Pagos recibidos":"Devoluciones"}</div>
       ${pays}
       <div class="balance-line ${cleared?'cleared':''}"><span>${balLabel}</span><span class="amt mono">${money(Math.max(0,bal),cur)}</span></div>
@@ -596,6 +623,12 @@ async function editConcept(id){
   e.concept = v.trim(); // vacío → vuelve a «Prestado» por defecto
   e._open=true; await save(); render();
 }
+async function editCurrency(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askChoose("Moneda", CURRENCIES, e.currency||"AUD");
+  if(v===null) return;
+  e.currency=v; e._open=true; await save(); render();
+}
 async function editItemCost(id,idx){
   const e=entries.find(x=>x.id===id); if(!e||!e.items[idx]) return;
   const v=await askEdit("¿Cuánto pagaste por «"+e.items[idx].name+"»? (coste, 0 = ninguno)", e.items[idx].cost||"", {number:true});
@@ -610,6 +643,7 @@ function openNew(type){
   if(type==="sale"){
     document.getElementById("s_buyer").value="";
     document.getElementById("s_paid").checked=false;
+    document.getElementById("s_cur").value="AUD";
     document.getElementById("itemRows").innerHTML="";
     addItemRow(); addItemRow();
     dlgSale.showModal();
@@ -635,8 +669,9 @@ async function saveSale(){
   const paidNow = document.getElementById("s_paid").checked;
   const total = items.reduce((a,i)=>a+(+i.price||0),0);
   const payments = (paidNow && total>0) ? [{amount:total,date:today()}] : [];
+  const cur=document.getElementById("s_cur").value||"AUD";
   const id="s-"+Date.now();
-  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:"AUD",items,payments,_open:true});
+  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:cur,items,payments,_open:true});
   await save(); render(); dlgSale.close(); pulse(id);
 }
 async function saveDebt(){
@@ -676,8 +711,10 @@ function importData(input){
 
 /* ——— importar inteligente (texto pegado o foto con OCR gratis) ——— */
 let impItems = [];
+let impCur = "AUD";
 function openImport(){
   impItems = [];
+  impCur = "AUD";
   document.getElementById("imp_text").value = "";
   document.getElementById("imp_status").textContent = "";
   document.getElementById("imp_step2").style.display = "none";
@@ -716,6 +753,7 @@ function renderImpPreview(){
   step2.innerHTML = `
     <div class="imp-sep">Revisa y edita antes de crear (${impItems.length})</div>
     <input id="imp_buyer" placeholder="Comprador (¿a quién?)" autocomplete="off">
+    <label class="curlbl">Moneda <select id="imp_cur" class="cur-select"></select></label>
     <div id="imp_rows"></div>
     <button class="quick" onclick="impAddRow()">+ añadir línea</button>
     <div class="dlg-actions">
@@ -736,6 +774,10 @@ function renderImpPreview(){
     p.oninput = () => impItems[i].price = parseFloat(p.value) || 0;
     d.onclick = () => { impItems.splice(i,1); renderImpPreview(); };
   });
+  const csel = document.getElementById("imp_cur");
+  csel.innerHTML = CURRENCIES.map(c=>`<option value="${c}">${c}</option>`).join("");
+  csel.value = impCur;
+  csel.onchange = () => impCur = csel.value;
   document.getElementById("imp_step1").style.display = "none";
   step2.style.display = "";
 }
@@ -749,7 +791,7 @@ async function impCreate(){
   const items = impItems.map(i=>({name:(i.name||"").trim(), price:+i.price||0})).filter(i=>i.name);
   if(!items.length){ await notify("No hay artículos con nombre."); return; }
   const id = "s-"+Date.now();
-  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:"AUD",items,payments:[],_open:true});
+  entries.unshift({id,type:"sale",party:buyer,date:today(),currency:impCur||"AUD",items,payments:[],_open:true});
   await save(); render(); dlgImport.close(); pulse(id);
 }
 // OCR gratis con Tesseract.js (se carga bajo demanda desde CDN; necesita internet)
@@ -787,6 +829,11 @@ async function startEmpty(){
   Store.set("seed_debts","1"); // evita que se vuelvan a sembrar las deudas
   save(); render();
 }
+
+// poblar los desplegables de moneda (venta, deuda) con la lista
+document.querySelectorAll("select.cur-select").forEach(sel=>{
+  sel.innerHTML = CURRENCIES.map(c=>`<option value="${c}">${c}</option>`).join("");
+});
 
 load();
 
