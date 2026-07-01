@@ -31,6 +31,14 @@
   .stat .val .sub{display:block}
   .stat.inflow .val{color:var(--green)}
   .stat.outflow .val{color:var(--warn)}
+  .hero{background:linear-gradient(180deg,#262626,#202020);border:1px solid var(--line);border-radius:16px;padding:16px 16px 12px}
+  .hero-lbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .hero-val{font-size:26px;font-weight:800;line-height:1.15;display:flex;flex-wrap:wrap;gap:4px 14px}
+  .hero-val .sub{display:inline}
+  .chart-lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:16px 0 6px}
+  .chart{width:100%;height:92px;display:block}
+  .chart rect{fill:var(--lime)}
+  .chart text{fill:var(--dim);font-size:9px;font-family:inherit}
   .stat.sold .val{color:var(--lime)}
   .stat.collected .val{color:var(--green)}
   .stat.pending .val{color:var(--warn)}
@@ -457,13 +465,67 @@ function currencyHTML(m){
   if(!keys.length) return `<span class="sub">—</span>`;
   return keys.map(c=>`<span class="sub mono">${money(m[c],c)}</span>`).join("");
 }
+/* ——— resumen: neto y mini-gráfico ——— */
+const MONTHS=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+function netByCurrency(){
+  const inn = sumByCurrency(entries.filter(e=>e.type==="sale"));
+  const out = sumByCurrency(entries.filter(e=>e.type==="debt"));
+  const m = {};
+  Object.keys(inn).forEach(c=>m[c]=(m[c]||0)+inn[c]);
+  Object.keys(out).forEach(c=>m[c]=(m[c]||0)-out[c]);
+  return m;
+}
+function netHTML(m){
+  const keys=Object.keys(m).filter(c=>Math.round(m[c])!==0);
+  if(!keys.length) return `<span class="sub">—</span>`;
+  return keys.map(c=>{
+    const v=m[c], cls=v>=0?"profit-pos":"profit-neg";
+    return `<span class="sub mono ${cls}">${(v<0?"−":"")+money(Math.abs(v),c)}</span>`;
+  }).join("");
+}
+function dominantCurrency(){
+  const c={}; entries.forEach(e=>{ c[e.currency]=(c[e.currency]||0)+1; });
+  let best="AUD", n=-1; Object.keys(c).forEach(k=>{ if(c[k]>n){ n=c[k]; best=k; } });
+  return best;
+}
+function monthlySeries(cur){
+  const now=new Date(), buckets=[];
+  for(let k=5;k>=0;k--){
+    const d=new Date(now.getFullYear(), now.getMonth()-k, 1);
+    buckets.push({ ym:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label:MONTHS[d.getMonth()], value:0 });
+  }
+  entries.filter(e=>e.type==="sale" && e.currency===cur).forEach(e=>{
+    e.payments.forEach(p=>{ const b=buckets.find(x=>x.ym===(p.date||"").slice(0,7)); if(b) b.value+=(+p.amount||0); });
+  });
+  return buckets;
+}
+function chartSVG(series){
+  const max=Math.max(1, ...series.map(s=>s.value));
+  const W=300, H=92, gap=10, n=series.length, bw=(W-gap*(n-1))/n;
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" preserveAspectRatio="none">`+
+    series.map((s,i)=>{
+      const h=Math.round((s.value/max)*(H-24)), x=i*(bw+gap);
+      return `<rect x="${x}" y="${H-20-h}" width="${bw}" height="${Math.max(h,2)}" rx="3" opacity="${s.value?0.92:0.16}"></rect>`+
+             `<text x="${x+bw/2}" y="${H-5}" text-anchor="middle">${s.label}</text>`;
+    }).join("")+`</svg>`;
+}
 
 function render(intro){
   introMode = !!intro;
   const sales = entries.filter(e=>e.type==="sale");
   const debts = entries.filter(e=>e.type==="debt");
 
+  const net = netByCurrency();
+  const domCur = dominantCurrency();
+  const series = monthlySeries(domCur);
+  const hasChart = series.some(s=>s.value>0);
   document.getElementById("totals").innerHTML = `
+    <div class="group-lbl">Resumen</div>
+    <div class="hero"${inAnim(0)}>
+      <div class="hero-lbl">Neto · me deben − debo</div>
+      <div class="hero-val">${netHTML(net)}</div>
+      ${hasChart ? `<div class="chart-lbl">Cobrado · últimos 6 meses (${domCur})</div>${chartSVG(series)}` : ``}
+    </div>
     <div class="group-lbl">Ventas</div>
     <div class="totals tri">
       <div class="stat sold"${inAnim(0)}><div class="lbl">Vendido</div><div class="val">${currencyHTML(sumSoldByCurrency(sales))}</div></div>
