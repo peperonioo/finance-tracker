@@ -22,6 +22,7 @@
   .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
   header{margin-bottom:18px}
   .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+  .ver{color:#5a5a55;letter-spacing:.06em;font-weight:600}
   h1{font-size:26px;font-weight:800;letter-spacing:-.01em}
 
   .totals{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:18px 0 24px}
@@ -212,7 +213,7 @@
 </head>
 <body>
 <header>
-  <div class="eyebrow">Finance Tracker</div>
+  <div class="eyebrow">Finance Tracker <span class="ver" id="ver"></span></div>
   <h1>Ventas y deudas</h1>
 </header>
 
@@ -1092,6 +1093,10 @@ async function startEmpty(){
   Store.set("seed_debts","1"); // evita que se vuelvan a sembrar las deudas
   save(); render();
 }
+
+// versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
+const APP_VERSION = "v21";
+document.getElementById("ver").textContent = APP_VERSION;
 
 // poblar los desplegables de moneda (venta, deuda) con la lista
 document.querySelectorAll("select.cur-select").forEach(sel=>{
