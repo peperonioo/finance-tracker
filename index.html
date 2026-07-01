@@ -1163,19 +1163,16 @@ async function sbUpsert(id, dataStr, iso){
   });
   if(!r.ok) throw new Error("UPSERT "+r.status+" "+(await r.text()));
 }
-async function pushCloud(k){
-  const ts = (+Store.get("data_updated")) || Date.now();
-  const cipher = await encryptData(k.key, entries.map(({_open,...e})=>e));
-  await sbUpsert(k.id, cipher, new Date(ts).toISOString());
-  Store.set("data_updated", ""+ts);
-}
-async function pullCloud(k, row){
-  const data = await decryptData(k.key, row.data);
-  if(!Array.isArray(data)) throw new Error("bad");
-  entries = normalize(data);
-  Store.set("data_updated", ""+Date.parse(row.updated_at));
-  Store.set("entries", JSON.stringify(entries)); // persiste sin marcar cambio
-  render();
+const cleanArr = arr => JSON.stringify(arr.map(({_open,...e})=>e));
+// Fusiona por id (unión): nunca borra algo que existe en un lado y no en el otro.
+// En conflicto de mismo id, gana el lado "más nuevo".
+function mergeEntries(local, cloud, localNewer){
+  const map = new Map();
+  const first = localNewer ? cloud : local;   // el más viejo primero
+  const second = localNewer ? local : cloud;   // el más nuevo pisa en conflicto
+  first.forEach(e=>{ if(e&&e.id) map.set(e.id,e); });
+  second.forEach(e=>{ if(e&&e.id) map.set(e.id,e); });
+  return [...map.values()];
 }
 async function cloudSync(silent){
   if(!syncConfigured() || !navigator.onLine || syncing) return;
@@ -1183,11 +1180,23 @@ async function cloudSync(silent){
   try{
     const k = await ensureKey();
     const row = await sbGet(k.id);
+    const cloudArr = row ? normalize(await decryptData(k.key, row.data)) : [];
+    const localArr = entries;
     const localTime = (+Store.get("data_updated")) || 0;
     const cloudTime = row ? Date.parse(row.updated_at) : 0;
-    if(row && cloudTime > localTime){ await pullCloud(k,row); setSyncStatus("⬇︎ Actualizado desde la nube"); }
-    else { await pushCloud(k); setSyncStatus("⬆︎ Guardado en la nube"); }
+    const merged = mergeEntries(localArr, cloudArr, localTime>=cloudTime);
+    const mStr=cleanArr(merged), lStr=cleanArr(localArr), cStr=cleanArr(cloudArr);
+    // copia de rescate del estado local ANTES de tocar nada (por si acaso)
+    if(mStr!==lStr) Store.set("entries_prev", lStr);
+    if(mStr!==lStr){ entries=merged; Store.set("entries", mStr); render(); }
+    if(mStr!==cStr){
+      const ts=Date.now(); Store.set("data_updated",""+ts);
+      await sbUpsert(k.id, await encryptData(k.key, merged.map(({_open,...e})=>e)), new Date(ts).toISOString());
+    } else {
+      Store.set("data_updated", ""+Math.max(localTime,cloudTime));
+    }
     Store.set("sync_time", ""+Date.now());
+    setSyncStatus(mStr!==lStr ? "⬇︎ Sincronizado (fusionado)" : "✓ Todo sincronizado");
     updateSyncBadge();
   }catch(e){
     setSyncStatus(/operation|decrypt|bad/i.test(String(e.message)) ? "⚠︎ ¿Clave incorrecta?" : "⚠︎ Sin conexión con la nube");
@@ -1211,27 +1220,11 @@ function openSync(){
 async function connectSync(){
   const code = (document.getElementById("sync_code_in").value||"").trim();
   if(code.length<4){ setSyncStatus("Elige una clave de al menos 4 caracteres."); return; }
-  const firstTime = Store.get("sync_code")!==code || !Store.get("sync_time");
   Store.set("sync_code", code); syncKey=null;
   setSyncStatus("Conectando…");
-  try{
-    const k = await ensureKey();
-    const row = await sbGet(k.id);
-    // primera conexión con conflicto: hay datos en la nube Y aquí → preguntar
-    if(firstTime && row && entries.length){
-      const localTime=(+Store.get("data_updated"))||0, cloudTime=Date.parse(row.updated_at);
-      const pick = await askChoose("Ya hay datos en la nube y en este dispositivo. ¿Cuáles conservar?",
-        ["Los de este dispositivo","Los de la nube"], "Los de este dispositivo");
-      if(pick===null){ setSyncStatus("Cancelado."); return; }
-      if(pick==="Los de la nube"){ await pullCloud(k,row); setSyncStatus("⬇︎ Bajados de la nube"); }
-      else { Store.set("data_updated", ""+Math.max(localTime, cloudTime+1)); await pushCloud(k); setSyncStatus("⬆︎ Subidos a la nube"); }
-      Store.set("sync_time", ""+Date.now());
-    } else {
-      await cloudSync(true);
-    }
-    document.getElementById("sync_disconnect").style.display="";
-    updateSyncBadge();
-  }catch(e){ setSyncStatus(/operation|decrypt|bad/i.test(String(e.message)) ? "⚠︎ ¿Clave incorrecta?" : "⚠︎ No se pudo conectar"); }
+  await cloudSync(true);   // fusiona local + nube, sin pérdidas
+  document.getElementById("sync_disconnect").style.display="";
+  updateSyncBadge();
 }
 function disconnectSync(){
   Store.set("sync_code",""); localStorage.removeItem("sync_code");
@@ -1242,7 +1235,7 @@ function disconnectSync(){
 window.addEventListener("online", ()=>{ if(syncConfigured()) cloudSync(true); });
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v22";
+const APP_VERSION = "v23";
 document.getElementById("ver").textContent = APP_VERSION;
 updateSyncBadge();
 
