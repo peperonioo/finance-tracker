@@ -58,12 +58,17 @@
   .del-entry{display:block;margin:16px 0 2px;background:none;border:none;color:#6b6b66;font-size:12px;font-weight:600;cursor:pointer;padding:8px 0;font-family:inherit;text-align:left}
   .del-entry:hover{color:var(--red)}
   .card.swiping{transition:none}
-  .card.will-del{border-color:var(--red);box-shadow:-2px 0 0 0 var(--red) inset}
+  .card.will-del{border-color:var(--red)}
+  .card.will-del::after{content:"🗑  soltar para borrar";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(224,139,124,.16);color:var(--red);font-weight:700;font-size:13px;letter-spacing:.02em;border-radius:14px;pointer-events:none}
+  /* confeti al saldar/cobrar del todo */
+  .confetti{position:fixed;inset:0;pointer-events:none;z-index:60;overflow:hidden}
+  .confetti i{position:absolute;top:28%;width:8px;height:12px;border-radius:2px;opacity:0;animation:conf var(--d) cubic-bezier(.2,.6,.4,1) forwards}
+  @keyframes conf{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(calc(var(--x)*160px),62vh) rotate(var(--r))}}
 
   .group-lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:22px 0 10px;display:flex;align-items:center;gap:8px}
   .group-lbl::after{content:"";flex:1;height:1px;background:var(--line)}
 
-  .card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden}
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden;position:relative}
   .head{display:flex;align-items:center;gap:12px;padding:15px 16px;cursor:pointer}
   .head .who{font-size:17px;font-weight:700;flex:1}
   .head .who .date{display:block;font-size:11px;font-weight:400;color:var(--dim);margin-top:2px}
@@ -347,6 +352,44 @@ function pulse(id){
   if(!el) return;
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
+const REDUCE = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+// count-up: los números del resumen suben hasta su valor (con fallback si rAF no corre)
+const lastCounts = {};
+let cuTimer=null;
+function animateCounts(fromZero){
+  if(REDUCE) return; // el HTML ya trae los valores finales
+  const items=[...document.querySelectorAll(".cu")].map(el=>({
+    el, key:el.dataset.key, to:+el.dataset.to, cur:el.dataset.cur, sign:el.dataset.sign||"",
+    from: fromZero?0:(el.dataset.key in lastCounts?lastCounts[el.dataset.key]:0)
+  }));
+  if(!items.length) return;
+  const dur=650, t0=performance.now(), fmt=(v,cur,sign)=>sign+money(v,cur);
+  clearTimeout(cuTimer);
+  cuTimer=setTimeout(()=>items.forEach(it=>{ it.el.textContent=fmt(it.to,it.cur,it.sign); lastCounts[it.key]=it.to; }), dur+220);
+  (function step(now){
+    const p=Math.min(1,(now-t0)/dur), e=1-Math.pow(1-p,3);
+    items.forEach(it=>it.el.textContent=fmt(it.from+(it.to-it.from)*e,it.cur,it.sign));
+    if(p<1) requestAnimationFrame(step);
+    else { items.forEach(it=>{ it.el.textContent=fmt(it.to,it.cur,it.sign); lastCounts[it.key]=it.to; }); clearTimeout(cuTimer); }
+  })(performance.now());
+}
+// confeti lima al saldar/cobrar una entrada del todo
+function confetti(){
+  if(REDUCE) return;
+  const colors=["#CCFF00","#F2F2F0","#7CCF6B"];
+  const box=document.createElement("div"); box.className="confetti";
+  for(let i=0;i<26;i++){
+    const p=document.createElement("i");
+    p.style.setProperty("--x",(Math.random()*2-1).toFixed(2));
+    p.style.setProperty("--r",((Math.random()*540-270)|0)+"deg");
+    p.style.setProperty("--d",(0.9+Math.random()*0.7).toFixed(2)+"s");
+    p.style.left=(44+Math.random()*12)+"%";
+    p.style.background=colors[i%3];
+    box.appendChild(p);
+  }
+  document.body.appendChild(box);
+  setTimeout(()=>box.remove(), 2000);
+}
 
 const fmt = n => Math.round(n).toLocaleString("en-AU");
 const today = () => new Date().toISOString().slice(0,10);
@@ -460,10 +503,12 @@ function sumSoldByCurrency(list){
   list.forEach(e=>{ const t=principal(e); if(t>0){ m[e.currency]=(m[e.currency]||0)+t; } });
   return m;
 }
-function currencyHTML(m){
+function currencyHTML(m, key){
   const keys=Object.keys(m);
   if(!keys.length) return `<span class="sub">—</span>`;
-  return keys.map(c=>`<span class="sub mono">${money(m[c],c)}</span>`).join("");
+  return keys.map(c=> key
+    ? `<span class="sub mono cu" data-key="${key}-${c}" data-to="${m[c]}" data-cur="${c}">${money(m[c],c)}</span>`
+    : `<span class="sub mono">${money(m[c],c)}</span>`).join("");
 }
 /* ——— resumen: neto y mini-gráfico ——— */
 const MONTHS=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
@@ -480,7 +525,7 @@ function netHTML(m){
   if(!keys.length) return `<span class="sub">—</span>`;
   return keys.map(c=>{
     const v=m[c], cls=v>=0?"profit-pos":"profit-neg";
-    return `<span class="sub mono ${cls}">${(v<0?"−":"")+money(Math.abs(v),c)}</span>`;
+    return `<span class="sub mono cu ${cls}" data-key="neto-${c}" data-to="${Math.abs(v)}" data-cur="${c}" data-sign="${v<0?'−':''}">${(v<0?"−":"")+money(Math.abs(v),c)}</span>`;
   }).join("");
 }
 function dominantCurrency(){
@@ -528,14 +573,14 @@ function render(intro){
     </div>
     <div class="group-lbl">Ventas</div>
     <div class="totals tri">
-      <div class="stat sold"${inAnim(0)}><div class="lbl">Vendido</div><div class="val">${currencyHTML(sumSoldByCurrency(sales))}</div></div>
-      <div class="stat collected"${inAnim(1)}><div class="lbl">Cobrado</div><div class="val">${currencyHTML(sumPaidByCurrency(sales))}</div></div>
-      <div class="stat pending"${inAnim(2)}><div class="lbl">Me deben</div><div class="val">${currencyHTML(sumByCurrency(sales))}</div></div>
+      <div class="stat sold"${inAnim(0)}><div class="lbl">Vendido</div><div class="val">${currencyHTML(sumSoldByCurrency(sales),"vendido")}</div></div>
+      <div class="stat collected"${inAnim(1)}><div class="lbl">Cobrado</div><div class="val">${currencyHTML(sumPaidByCurrency(sales),"cobrado")}</div></div>
+      <div class="stat pending"${inAnim(2)}><div class="lbl">Me deben</div><div class="val">${currencyHTML(sumByCurrency(sales),"medeben")}</div></div>
     </div>
     <div class="group-lbl">Deudas</div>
     <div class="totals">
-      <div class="stat outflow"${inAnim(3)}><div class="lbl">Debo</div><div class="val">${currencyHTML(sumByCurrency(debts))}</div></div>
-      <div class="stat returned"${inAnim(4)}><div class="lbl">Devuelto</div><div class="val">${currencyHTML(sumPaidByCurrency(debts))}</div></div>
+      <div class="stat outflow"${inAnim(3)}><div class="lbl">Debo</div><div class="val">${currencyHTML(sumByCurrency(debts),"debo")}</div></div>
+      <div class="stat returned"${inAnim(4)}><div class="lbl">Devuelto</div><div class="val">${currencyHTML(sumPaidByCurrency(debts),"devuelto")}</div></div>
     </div>
   `;
 
@@ -547,6 +592,7 @@ function render(intro){
   `;
   introMode = false; // la entrada escalonada solo se aplica una vez
   updateBackupHint();
+  animateCounts(intro);
 }
 
 function card(e,i){
@@ -630,15 +676,21 @@ function toggle(id){ const e=entries.find(x=>x.id===id); e._open=!e._open; rende
 async function addPay(id){
   const inp=document.getElementById("pin-"+id); const v=parseFloat(inp.value);
   if(!v||v<=0){ inp.focus(); return; }
-  const e=entries.find(x=>x.id===id); e.payments.push({amount:v,date:today()}); e._open=true;
+  const e=entries.find(x=>x.id===id); const wasCleared=balance(e)<=0;
+  e.payments.push({amount:v,date:today()}); e._open=true;
   await save(); render(); pulse(id);
+  if(!wasCleared && balance(e)<=0) confetti();
 }
-async function quickPay(id,amt){ const e=entries.find(x=>x.id===id); e.payments.push({amount:amt,date:today()}); e._open=true; await save(); render(); pulse(id); }
+async function quickPay(id,amt){
+  const e=entries.find(x=>x.id===id); const wasCleared=balance(e)<=0;
+  e.payments.push({amount:amt,date:today()}); e._open=true; await save(); render(); pulse(id);
+  if(!wasCleared && balance(e)<=0) confetti();
+}
 async function markPaidFull(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
   const bal=balance(e); if(bal<=0) return;
   e.payments.push({amount:bal,date:today()}); e._open=true;
-  await save(); render(); pulse(id);
+  await save(); render(); pulse(id); confetti();
 }
 async function delPay(id,pi){ const e=entries.find(x=>x.id===id); e.payments.splice(pi,1); e._open=true; await save(); render(); }
 async function delEntry(id){
