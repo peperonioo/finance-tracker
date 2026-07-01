@@ -44,8 +44,11 @@
   .chart-tip{text-align:center;font-size:11.5px;color:var(--lime);margin-top:8px;min-height:16px;opacity:0;transition:opacity .15s}
   .chart-tip.show{opacity:1}
   /* entradas saldadas: atenuadas y con el importe tachado (no se borran) */
-  .done-sep{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin:14px 0 10px;display:flex;align-items:center;gap:8px}
+  .done-sep{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin:14px 0 10px;display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;padding:0;cursor:pointer;font-family:inherit;text-align:left}
   .done-sep::after{content:"";flex:1;height:1px;background:var(--line)}
+  .done-chevron{display:inline-block;font-size:9px;transition:transform .18s}
+  .done-chevron.open{transform:rotate(90deg)}
+  .done-hint{order:1;color:var(--dim);letter-spacing:.06em;text-transform:none}
   .card.done{opacity:.72}
   .card.done .who,.card.done .date{color:var(--dim)}
   .card.done .pill s{opacity:.85}
@@ -614,6 +617,8 @@ function chartTap(i){
 }
 
 let searchQuery = "", sortMode = "recent";
+let doneOpen = { sale:false, debt:false };
+function toggleDone(kind){ doneOpen[kind] = !doneOpen[kind]; renderList(); }
 function onboardingHTML(){
   return `<div class="onboard">
     <div class="onboard-emoji">💸</div>
@@ -645,21 +650,25 @@ function renderList(){
     sales=sales.filter(match); debts=debts.filter(match);
   }
   sales=sortEntries(sales); debts=sortEntries(debts);
-  const groupHTML=(list, start, emptyMsg)=>{
+  const groupHTML=(list, start, emptyMsg, kind)=>{
     if(!list.length) return `<div class="empty">${emptyMsg}</div>`;
     const pend=list.filter(e=>balance(e)>0), done=list.filter(e=>balance(e)<=0);
     let h=pend.map((e,i)=>card(e,start+i)).join("");
     if(done.length){
-      h+=`<div class="done-sep">✓ Completadas · ${done.length} (siguen en tu historial)</div>`;
-      h+=done.map((e,i)=>card(e,start+pend.length+i)).join("");
+      const open=doneOpen[kind];
+      h+=`<button class="done-sep" onclick="toggleDone('${kind}')" aria-expanded="${open}">`
+        +`<span class="done-chevron ${open?'open':''}">▸</span>`
+        +`✓ Completadas · ${done.length}`
+        +`<span class="done-hint">${open?'ocultar':'ver'}</span></button>`;
+      if(open) h+=done.map((e,i)=>card(e,start+pend.length+i)).join("");
     }
     return h;
   };
   document.getElementById("app").innerHTML = `
     <div class="group-lbl">Ventas</div>
-    ${groupHTML(sales, 5, q?'Sin resultados en ventas.':'Sin ventas todavía.')}
+    ${groupHTML(sales, 5, q?'Sin resultados en ventas.':'Sin ventas todavía.', 'sale')}
     <div class="group-lbl">Deudas</div>
-    ${groupHTML(debts, 5+sales.length, q?'Sin resultados en deudas.':'Sin deudas. 🎉')}
+    ${groupHTML(debts, 5+sales.length, q?'Sin resultados en deudas.':'Sin deudas. 🎉', 'debt')}
   `;
 }
 function onSearch(v){ searchQuery=v; renderList(); }
@@ -1235,7 +1244,7 @@ function disconnectSync(){
 window.addEventListener("online", ()=>{ if(syncConfigured()) cloudSync(true); });
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v23";
+const APP_VERSION = "v24";
 document.getElementById("ver").textContent = APP_VERSION;
 updateSyncBadge();
 
