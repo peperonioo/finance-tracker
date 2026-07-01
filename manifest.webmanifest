@@ -1,7 +1,7 @@
 {
-  "name": "Tool",
-  "short_name": "Tool",
-  "description": "Registro de ventas y deudas",
+  "name": "Finance Tracker",
+  "short_name": "Finance",
+  "description": "Ventas, deudas y finanzas personales",
   "lang": "es",
   "start_url": "./",
   "scope": "./",
