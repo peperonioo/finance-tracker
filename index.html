@@ -43,7 +43,9 @@
   .chart-tip{text-align:center;font-size:11.5px;color:var(--lime);margin-top:8px;min-height:16px;opacity:0;transition:opacity .15s}
   .chart-tip.show{opacity:1}
   /* entradas saldadas: atenuadas y con el importe tachado (no se borran) */
-  .card.done{opacity:.62}
+  .done-sep{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin:14px 0 10px;display:flex;align-items:center;gap:8px}
+  .done-sep::after{content:"";flex:1;height:1px;background:var(--line)}
+  .card.done{opacity:.72}
   .card.done .who,.card.done .date{color:var(--dim)}
   .card.done .pill s{opacity:.85}
   @media (hover:hover){ .card.done:hover{opacity:1} }
@@ -624,11 +626,21 @@ function renderList(){
     sales=sales.filter(match); debts=debts.filter(match);
   }
   sales=sortEntries(sales); debts=sortEntries(debts);
+  const groupHTML=(list, start, emptyMsg)=>{
+    if(!list.length) return `<div class="empty">${emptyMsg}</div>`;
+    const pend=list.filter(e=>balance(e)>0), done=list.filter(e=>balance(e)<=0);
+    let h=pend.map((e,i)=>card(e,start+i)).join("");
+    if(done.length){
+      h+=`<div class="done-sep">✓ Completadas · ${done.length} (siguen en tu historial)</div>`;
+      h+=done.map((e,i)=>card(e,start+pend.length+i)).join("");
+    }
+    return h;
+  };
   document.getElementById("app").innerHTML = `
     <div class="group-lbl">Ventas</div>
-    ${sales.length ? sales.map((e,i)=>card(e,i+5)).join("") : `<div class="empty">${q?'Sin resultados en ventas.':'Sin ventas todavía.'}</div>`}
+    ${groupHTML(sales, 5, q?'Sin resultados en ventas.':'Sin ventas todavía.')}
     <div class="group-lbl">Deudas</div>
-    ${debts.length ? debts.map((e,i)=>card(e,i+5+sales.length)).join("") : `<div class="empty">${q?'Sin resultados en deudas.':'Sin deudas. 🎉'}</div>`}
+    ${groupHTML(debts, 5+sales.length, q?'Sin resultados en deudas.':'Sin deudas. 🎉')}
   `;
 }
 function onSearch(v){ searchQuery=v; renderList(); }
