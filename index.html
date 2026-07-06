@@ -337,7 +337,7 @@ function askEdit(title, value="", opts={}){
     document.getElementById("ed_select").style.display = "none";
     const inp = document.getElementById("ed_input");
     inp.style.display = "";
-    inp.type = opts.number ? "number" : "text";
+    inp.type = opts.date ? "date" : (opts.number ? "number" : "text");
     if(opts.number) inp.setAttribute("inputmode","decimal"); else inp.removeAttribute("inputmode");
     inp.value = (value==null ? "" : value);
     document.getElementById("ed_ok").textContent = opts.ok || "Guardar";
@@ -439,7 +439,12 @@ function confetti(){
 
 const fmt = n => Math.round(n).toLocaleString("en-AU");
 const today = () => new Date().toISOString().slice(0,10);
-const niceDate = iso => { const [y,m,d]=iso.split("-"); return `${d}/${m}/${y.slice(2)}`; };
+const niceDate = iso => { const [y,m,d]=(iso||today()).split("-"); return `${d}/${m}/${y.slice(2)}`; };
+// id único para cada pago nuevo (garantiza que la fusión por id nunca pierda pagos)
+const newPayId = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+// id determinista para pagos antiguos sin id: idéntico en ambos dispositivos si el
+// pago está en la misma posición con la misma fecha/importe (así no se duplica al fusionar).
+const legacyPayId = (entryId, p, idx) => "l" + entryId + "-" + idx + "-" + (p&&p.date||"") + "-" + (p&&p.amount||0);
 const CURRENCIES = ["AUD","USD","EUR","GBP","NZD","CAD","MXN","COP","ARS","BRL","CLP","JPY"];
 const SYMBOLS = {AUD:"A$",USD:"US$",EUR:"€",GBP:"£",NZD:"NZ$",CAD:"C$",MXN:"MX$",COP:"COP$",ARS:"AR$",BRL:"R$",CLP:"CLP$",JPY:"¥"};
 const sym = c => SYMBOLS[c] || ((c||"")+" ");
@@ -478,6 +483,9 @@ function normalize(data){
       if(!e.date) e.date = today();
       e.items = Array.isArray(e.items) ? e.items : [];
       e.payments = Array.isArray(e.payments) ? e.payments : [];
+      e.deletedPays = Array.isArray(e.deletedPays) ? e.deletedPays : [];
+      // cada pago debe tener id estable (para fusionar sin perder ni duplicar)
+      e.payments.forEach((p,idx)=>{ if(p && !p.id) p.id = legacyPayId(e.id, p, idx); });
       e.items.forEach(i=>{ if(i && i.name==="Coffee") i.name="Coffee machine"; });
       // migración: coste por venta (e.cost) → coste del primer artículo con precio
       if(e.type==="sale" && +e.cost>0 && e.items.length){
@@ -525,12 +533,12 @@ function seedTristan(){
       {name:"Guitar (+ strings)",price:200},{name:"Bass",price:90},
       {name:"Akai",price:100},{name:"Nutribullet",price:60},
       {name:"2x Piano stand",price:70},{name:"Coffee machine",price:0}
-    ], payments:[{amount:100,date:today()}] };
+    ], payments:[{id:newPayId(),amount:100,date:today()}] };
 }
 function seedDebts(){
   return [
     { id:"debt-enrique", type:"debt", party:"Enrique", date:today(), currency:"EUR",
-      principal:430, payments:[{amount:300,date:today()}] },
+      principal:430, payments:[{id:newPayId(),amount:300,date:today()}] },
     { id:"debt-dario", type:"debt", party:"Darío", date:today(), currency:"AUD",
       principal:500, payments:[] },
     { id:"debt-dani", type:"debt", party:"Dani Alonso", date:today(), currency:"AUD",
@@ -759,7 +767,7 @@ function card(e,i){
   }
 
   const pays = e.payments.length
-    ? e.payments.map((p,pi)=>`<div class="pay"><span>${niceDate(p.date)}</span><span><span class="amt mono">+${money(p.amount,cur)}</span> <button class="pay-del" onclick="delPay('${e.id}',${pi})">×</button></span></div>`).join("")
+    ? e.payments.map((p)=>`<div class="pay"><button class="edit-btn pay-date" onclick="editPayDate('${e.id}','${p.id}')" title="Editar fecha">${niceDate(p.date)}<span class="ed">✎</span></button><span><span class="amt mono">+${money(p.amount,cur)}</span> <button class="pay-del" onclick="delPay('${e.id}','${p.id}')">×</button></span></div>`).join("")
     : `<div class="nopay">${e.type==="sale"?"Aún sin pagos.":"Aún no has devuelto nada."}</div>`;
 
   const balLabel = e.type==="sale" ? (cleared?"Cobrado":"Te debe") : (cleared?"Saldado":"Debes");
@@ -802,22 +810,38 @@ async function addPay(id){
   const inp=document.getElementById("pin-"+id); const v=parseFloat(inp.value);
   if(!v||v<=0){ inp.focus(); return; }
   const e=entries.find(x=>x.id===id); const wasCleared=balance(e)<=0;
-  e.payments.push({amount:v,date:today()}); e._open=true;
+  e.payments.push({id:newPayId(),amount:v,date:today()}); e._open=true;
   await save(); render(); pulse(id);
   if(!wasCleared && balance(e)<=0) confetti();
 }
 async function quickPay(id,amt){
   const e=entries.find(x=>x.id===id); const wasCleared=balance(e)<=0;
-  e.payments.push({amount:amt,date:today()}); e._open=true; await save(); render(); pulse(id);
+  e.payments.push({id:newPayId(),amount:amt,date:today()}); e._open=true; await save(); render(); pulse(id);
   if(!wasCleared && balance(e)<=0) confetti();
 }
 async function markPaidFull(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
   const bal=balance(e); if(bal<=0) return;
-  e.payments.push({amount:bal,date:today()}); e._open=true;
+  e.payments.push({id:newPayId(),amount:bal,date:today()}); e._open=true;
   await save(); render(); pulse(id); confetti();
 }
-async function delPay(id,pi){ const e=entries.find(x=>x.id===id); e.payments.splice(pi,1); e._open=true; await save(); render(); }
+// borrar un pago: se registra su id como tombstone para que el borrado se
+// propague al sincronizar y el pago no reaparezca desde la nube.
+async function delPay(id,payId){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const idx=e.payments.findIndex(p=>p.id===payId); if(idx<0) return;
+  e.deletedPays = Array.isArray(e.deletedPays) ? e.deletedPays : [];
+  if(!e.deletedPays.includes(payId)) e.deletedPays.push(payId);
+  e.payments.splice(idx,1); e._open=true; await save(); render();
+}
+// editar la fecha de un pago (selector de fecha nativo, válido en PWA)
+async function editPayDate(id,payId){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const p=e.payments.find(x=>x.id===payId); if(!p) return;
+  const v=await askEdit("Fecha del pago", p.date||today(), {date:true});
+  if(v===null || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+  p.date=v; e._open=true; await save(); render();
+}
 async function delEntry(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
   const tipo = e.type==="sale" ? "la venta" : "la deuda";
@@ -924,7 +948,7 @@ async function saveSale(){
   // venta al contado: se siembra con un pago por el total (queda "cobrada")
   const paidNow = document.getElementById("s_paid").checked;
   const total = items.reduce((a,i)=>a+(+i.price||0),0);
-  const payments = (paidNow && total>0) ? [{amount:total,date:today()}] : [];
+  const payments = (paidNow && total>0) ? [{id:newPayId(),amount:total,date:today()}] : [];
   const cur=document.getElementById("s_cur").value||"AUD";
   const id="s-"+Date.now();
   entries.unshift({id,type:"sale",party:buyer,date:today(),currency:cur,items,payments,_open:true});
@@ -1173,14 +1197,32 @@ async function sbUpsert(id, dataStr, iso){
   if(!r.ok) throw new Error("UPSERT "+r.status+" "+(await r.text()));
 }
 const cleanArr = arr => JSON.stringify(arr.map(({_open,...e})=>e));
+// Fusiona pagos por id (unión): el más nuevo pisa en conflicto de mismo id.
+// Los pagos con id en `tomb` (borrados) se descartan → un borrado se propaga y no "revive".
+function mergePayments(older, newer, tomb){
+  const m = new Map();
+  (older||[]).forEach(p=>{ if(p&&p.id) m.set(p.id,p); });
+  (newer||[]).forEach(p=>{ if(p&&p.id) m.set(p.id,p); }); // el más nuevo gana en conflicto
+  return [...m.values()].filter(p=>!tomb.includes(p.id));
+}
 // Fusiona por id (unión): nunca borra algo que existe en un lado y no en el otro.
-// En conflicto de mismo id, gana el lado "más nuevo".
+// En conflicto de mismo id se toma el lado más nuevo para los campos escalares,
+// PERO los pagos se fusionan (unión) para no perder ninguno, y cada pago
+// conserva SU fecha: una sync nueva no puede pisar la fecha de un pago anterior.
 function mergeEntries(local, cloud, localNewer){
   const map = new Map();
-  const first = localNewer ? cloud : local;   // el más viejo primero
-  const second = localNewer ? local : cloud;   // el más nuevo pisa en conflicto
-  first.forEach(e=>{ if(e&&e.id) map.set(e.id,e); });
-  second.forEach(e=>{ if(e&&e.id) map.set(e.id,e); });
+  const older = localNewer ? cloud : local;   // el más viejo primero
+  const newer = localNewer ? local : cloud;   // el más nuevo pisa en conflicto
+  older.forEach(e=>{ if(e&&e.id) map.set(e.id,e); });
+  newer.forEach(e=>{
+    if(!e||!e.id) return;
+    const prev = map.get(e.id);
+    if(!prev){ map.set(e.id, e); return; }
+    // conflicto de misma entrada: base = campos del más nuevo, pero unión de pagos y tombstones
+    const tomb = [...new Set([...(prev.deletedPays||[]), ...(e.deletedPays||[])])];
+    const payments = mergePayments(prev.payments, e.payments, tomb);
+    map.set(e.id, { ...e, payments, deletedPays: tomb });
+  });
   return [...map.values()];
 }
 async function cloudSync(silent){
@@ -1244,7 +1286,7 @@ function disconnectSync(){
 window.addEventListener("online", ()=>{ if(syncConfigured()) cloudSync(true); });
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v24";
+const APP_VERSION = "v25";
 document.getElementById("ver").textContent = APP_VERSION;
 updateSyncBadge();
 
