@@ -64,6 +64,8 @@
   .done-chevron.open{transform:rotate(90deg)}
   .done-hint{order:1;color:var(--dim);letter-spacing:.06em;text-transform:none}
   .card.done{opacity:.72}
+  .age{color:var(--warn);font-weight:600;white-space:nowrap}
+  .age-hot{color:var(--red)}
   .card.done .who,.card.done .date{color:var(--dim)}
   .card.done .pill s{opacity:.85}
   @media (hover:hover){ .card.done:hover{opacity:1} }
@@ -249,6 +251,7 @@
   <input id="q" class="search" placeholder="Buscar por nombre o artículo…" autocomplete="off" oninput="onSearch(this.value)">
   <select id="sortSel" class="sort-select" onchange="onSort(this.value)">
     <option value="recent">Recientes</option>
+    <option value="old">Más antiguo</option>
     <option value="amount">Mayor importe</option>
     <option value="pending">Pendientes 1º</option>
   </select>
@@ -274,10 +277,11 @@
 <div id="backupHint" class="backup-hint"></div>
 
 <div id="snackbar" class="snackbar"><span class="snack-msg"></span><button class="snack-undo">Deshacer</button></div>
+<datalist id="partyList"></datalist>
 
 <dialog id="dlgSale">
   <h2>Nueva venta</h2>
-  <input id="s_buyer" placeholder="Comprador" autocomplete="off">
+  <input id="s_buyer" placeholder="Comprador" autocomplete="off" list="partyList">
   <div id="itemRows"></div>
   <button class="quick" onclick="addItemRow()">+ añadir artículo</button>
   <label class="curlbl">Moneda <select id="s_cur" class="cur-select"></select></label>
@@ -290,7 +294,7 @@
 
 <dialog id="dlgDebt">
   <h2>Nueva deuda</h2>
-  <input id="d_who" placeholder="¿A quién le debes?" autocomplete="off">
+  <input id="d_who" placeholder="¿A quién le debes?" autocomplete="off" list="partyList">
   <input id="d_concept" placeholder="¿Qué es? (opcional: préstamo, alquiler…)" autocomplete="off">
   <div class="two">
     <input id="d_amount" type="number" inputmode="decimal" placeholder="Importe que debes">
@@ -472,6 +476,17 @@ const newPayId = () => "p" + Date.now().toString(36) + Math.random().toString(36
 // id determinista para pagos antiguos sin id: idéntico en ambos dispositivos si el
 // pago está en la misma posición con la misma fecha/importe (así no se duplica al fusionar).
 const legacyPayId = (entryId, p, idx) => "l" + entryId + "-" + idx + "-" + (p&&p.date||"") + "-" + (p&&p.amount||0);
+// última actividad de una entrada = su fecha o la del último pago (la más reciente)
+function lastActivity(e){
+  let d=e.date||today();
+  (e.payments||[]).forEach(p=>{ if(p&&p.date && p.date>d) d=p.date; });
+  return d;
+}
+// días transcurridos desde una fecha ISO (yyyy-mm-dd)
+function daysSince(iso){
+  const ms=Date.parse(today())-Date.parse(iso||today());
+  return isNaN(ms)?0:Math.max(0, Math.floor(ms/86400000));
+}
 // tiempo relativo legible para el estado de sincronización
 function relTime(ts){
   if(!ts) return "";
@@ -683,6 +698,7 @@ function sortEntries(list){
   const arr=[...list];
   const cmp = sortMode==="amount" ? (a,b)=>balance(b)-balance(a)
     : sortMode==="pending" ? (a,b)=>balance(b)-balance(a)
+    : sortMode==="old" ? (a,b)=> lastActivity(a).localeCompare(lastActivity(b))   // más antiguo (más olvidado) primero
     : (a,b)=> (b.date||"").localeCompare(a.date||"") || (b.id>a.id?1:-1);
   arr.sort((a,b)=>{
     const ca=balance(a)<=0, cb=balance(b)<=0;
@@ -824,13 +840,16 @@ function card(e,i){
     ? esc(e.items[0].name) + (e.items.length>1 ? ` +${e.items.length-1}` : "") + " · "
     : (e.type==="debt" && e.concept ? esc(e.concept) + " · " : "");
   const payLabel = e.type==="sale" ? "Cobrar" : "Pagar";
+  // antigüedad: días desde el último movimiento (solo si sigue pendiente), para no olvidar cobrar
+  const age = cleared ? 0 : daysSince(lastActivity(e));
+  const ageBadge = age>=7 ? ` · <span class="age${age>=30?' age-hot':''}">⏰ ${age} días</span>` : "";
   const quick = e.id==="tristan" ? `<button class="quick" onclick="quickPay('${e.id}',100)">+ pago semanal de 100</button>` : "";
 
   return `
   <div class="card ${flow} ${e._open?'expanded':''} ${cleared?'done':''}" data-id="${e.id}"${inAnim(i)}>
     <div class="head" onclick="toggle('${e.id}')">
       <span class="chev">▶</span>
-      <div class="who"><button class="edit-btn who-edit" onclick="event.stopPropagation();renameEntry('${e.id}')" title="Renombrar">${esc(e.party)}<span class="ed">✎</span></button><span class="date">${itemHint}${niceDate(e.date)}</span></div>
+      <div class="who"><button class="edit-btn who-edit" onclick="event.stopPropagation();renameEntry('${e.id}')" title="Renombrar">${esc(e.party)}<span class="ed">✎</span></button><span class="date">${itemHint}${niceDate(e.date)}${ageBadge}</span></div>
       <span class="pill ${cleared?'done':'open'}">${pillTxt}</span>
     </div>
     <div class="progress"><div style="width:${pct}%"></div></div>
@@ -985,11 +1004,19 @@ async function editItemCost(id,idx){
 }
 
 /* nueva venta */
+// rellena las sugerencias de nombres (personas ya registradas) para el autocompletado
+function fillPartyList(){
+  const dl=document.getElementById("partyList"); if(!dl) return;
+  const names=[...new Set(entries.map(e=>e.party).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  dl.innerHTML = names.map(n=>`<option value="${esc(n)}"></option>`).join("");
+}
 function openNew(type){
+  const lastCur = Store.get("last_cur") || "AUD";   // recuerda la última moneda usada
+  fillPartyList();
   if(type==="sale"){
     document.getElementById("s_buyer").value="";
     document.getElementById("s_paid").checked=false;
-    document.getElementById("s_cur").value="AUD";
+    document.getElementById("s_cur").value=lastCur;
     document.getElementById("itemRows").innerHTML="";
     addItemRow(); addItemRow();
     dlgSale.showModal();
@@ -997,7 +1024,7 @@ function openNew(type){
     document.getElementById("d_who").value="";
     document.getElementById("d_concept").value="";
     document.getElementById("d_amount").value="";
-    document.getElementById("d_cur").value="AUD";
+    document.getElementById("d_cur").value=lastCur;
     dlgDebt.showModal();
   }
 }
@@ -1016,6 +1043,7 @@ async function saveSale(){
   const total = items.reduce((a,i)=>a+(+i.price||0),0);
   const payments = (paidNow && total>0) ? [{id:newPayId(),amount:total,date:today()}] : [];
   const cur=document.getElementById("s_cur").value||"AUD";
+  Store.set("last_cur", cur);
   const id="s-"+Date.now();
   entries.unshift({id,type:"sale",party:buyer,date:today(),currency:cur,items,payments,_open:true});
   await save(); render(); dlgSale.close(); pulse(id);
@@ -1027,6 +1055,7 @@ async function saveDebt(){
   if(!who){ document.getElementById("d_who").focus(); return; }
   if(!amt||amt<=0){ document.getElementById("d_amount").focus(); return; }
   const concept=document.getElementById("d_concept").value.trim();
+  Store.set("last_cur", cur);
   const id="d-"+Date.now();
   entries.push({id,type:"debt",party:who,date:today(),currency:cur,principal:amt,concept,payments:[],_open:true});
   await save(); render(); dlgDebt.close(); pulse(id);
@@ -1378,7 +1407,7 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v27";
+const APP_VERSION = "v28";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 updateSyncBadge();
