@@ -640,17 +640,25 @@ function monthlySeries(cur){
   });
   return buckets;
 }
-function chartSVG(series){
+// El SVG se dibuja a escala 1:1 con el ancho real (sin preserveAspectRatio="none",
+// que estiraba y emborronaba texto y barras). chartSVG deja el hueco; drawChart lo rellena.
+function chartSVG(series){ return `<svg id="chart" class="chart"></svg>`; }
+function drawChart(){
+  const svg=document.getElementById("chart"); if(!svg) return;
+  const series=lastSeries; if(!series || !series.length) return;
+  const W=Math.max(220, Math.round(svg.getBoundingClientRect().width || 300)), H=92;
   const max=Math.max(1, ...series.map(s=>s.value));
-  const W=300, H=92, gap=10, n=series.length, bw=(W-gap*(n-1))/n;
-  return `<svg viewBox="0 0 ${W} ${H}" class="chart" preserveAspectRatio="none">`+
-    series.map((s,i)=>{
-      const h=Math.round((s.value/max)*(H-24)), x=i*(bw+gap);
-      return `<rect x="${x}" y="${H-20-h}" width="${bw}" height="${Math.max(h,2)}" rx="3" opacity="${s.value?0.92:0.16}"></rect>`+
-             `<text x="${x+bw/2}" y="${H-5}" text-anchor="middle">${s.label}</text>`+
-             `<rect class="hit" x="${x-gap/2}" y="0" width="${bw+gap}" height="${H}" onclick="chartTap(${i})"></rect>`;
-    }).join("")+`</svg>`;
+  const n=series.length, gap=Math.max(8, Math.round(W*0.03)), bw=(W-gap*(n-1))/n;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = series.map((s,i)=>{
+    const h=Math.round((s.value/max)*(H-24)), x=i*(bw+gap);
+    return `<rect x="${x.toFixed(1)}" y="${H-20-h}" width="${bw.toFixed(1)}" height="${Math.max(h,2)}" rx="3" opacity="${s.value?0.92:0.16}"></rect>`+
+           `<text x="${(x+bw/2).toFixed(1)}" y="${H-5}" text-anchor="middle">${s.label}</text>`+
+           `<rect class="hit" x="${(x-gap/2).toFixed(1)}" y="0" width="${(bw+gap).toFixed(1)}" height="${H}" onclick="chartTap(${i})"></rect>`;
+  }).join("");
 }
+let _chartRz=null;
+window.addEventListener("resize", ()=>{ clearTimeout(_chartRz); _chartRz=setTimeout(drawChart, 120); });
 let lastSeries=[], lastChartCur="AUD", chartTipT=null;
 function chartTap(i){
   const s=lastSeries[i], el=document.getElementById("chartTip");
@@ -757,6 +765,7 @@ function render(intro){
     </div>
   `;
 
+  drawChart(); // dibuja el gráfico a escala real (nítido) una vez montado en el DOM
   if(toolbar) toolbar.style.display = entries.length>=3 ? "" : "none";
   renderList();
   introMode = false; // la entrada escalonada solo se aplica una vez
@@ -1369,7 +1378,7 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v26";
+const APP_VERSION = "v27";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 updateSyncBadge();

@@ -1,6 +1,6 @@
 // Service worker — Cuentas (Nu Amor)
 // Cambia CACHE_VERSION cuando edites index.html para forzar actualización.
-const CACHE_VERSION = "cuentas-v26";
+const CACHE_VERSION = "cuentas-v27";
 const ASSETS = [
   "./",
   "./index.html",
