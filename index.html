@@ -1390,6 +1390,16 @@ function disconnectSync(){
   setSyncStatus("Desconectado de este dispositivo."); updateSyncBadge();
 }
 window.addEventListener("online", ()=>{ if(syncConfigured()) cloudSync(true); });
+// empuja YA los cambios pendientes (sin esperar al debounce) — p.ej. antes de cerrar la app
+function flushSync(){ if(!syncConfigured()) return; if(syncTimer){ clearTimeout(syncTimer); syncTimer=null; } cloudSync(true); }
+// al pasar a segundo plano: sube lo pendiente antes de que el sistema suspenda la app.
+// al volver al primer plano: baja los cambios hechos en otros dispositivos.
+document.addEventListener("visibilitychange", ()=>{
+  if(!syncConfigured()) return;
+  if(document.visibilityState==="hidden") flushSync(); else cloudSync(true);
+});
+// iOS a veces cierra la PWA sin visibilitychange fiable: pagehide como red de seguridad
+window.addEventListener("pagehide", flushSync);
 
 // ——— tema claro / oscuro ———
 function applyTheme(t){
@@ -1407,7 +1417,7 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v28";
+const APP_VERSION = "v29";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 updateSyncBadge();
