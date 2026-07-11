@@ -49,6 +49,18 @@
   .mv-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
   .mv-approx{font-size:10.5px;color:var(--dim);white-space:nowrap}
   .stat-approx{font-size:11px;color:var(--dim);margin-top:4px}
+  /* proyección de fin de mes */
+  .proj{font-size:12px;color:var(--dim);margin:2px 2px 10px;line-height:1.5}
+  .proj .proj-out{color:var(--warn);font-weight:700}
+  .proj .proj-pos{color:var(--green);font-weight:700}
+  .proj .proj-neg{color:var(--red);font-weight:700}
+  /* curva de neto acumulado */
+  .chart .netline{fill:none;stroke:var(--acc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+  .chart .netarea{fill:rgba(204,255,0,.10);stroke:none}
+  :root[data-theme="light"] .chart .netarea{fill:rgba(92,118,0,.08)}
+  .chart .zero{stroke:var(--line);stroke-dasharray:3 3}
+  .chart .netdot{fill:var(--acc)}
+  .chart .netlbl{fill:var(--acc);font-size:10px;font-weight:700}
   /* fijos mensuales */
   .fixedrow .mv-ico{background:rgba(204,255,0,.10);color:var(--acc)}
   :root[data-theme="light"] .fixedrow .mv-ico{background:rgba(92,118,0,.08)}
@@ -1381,6 +1393,35 @@ function renderMes(){
   const showApx=(co.foreign+ci.foreign)>0;
   const apx=(v,pend)=>`<div class="stat-approx mono">≈ ${(v<0?"−":"")+moneyApprox(Math.abs(v),b)}${pend?" *":""}</div>`;
   const anyForeign=moves.some(e=>e.currency!==b);
+  const fixeds=entries.filter(e=>e.type==="fixed").sort((a,b)=>(+a.day||1)-(+b.day||1));
+  const todayD=+today().slice(8,10);
+  // ——— proyección de fin de mes (honesta): los fijos pendientes se suman tal
+  // cual (el alquiler no se extrapola) y solo el gasto variable va por ritmo diario
+  const daysInMonth=new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  // tipo de cambio conocido más reciente por moneda (de los snapshots; sin red)
+  const knownRate=c=>{ if(c===b) return 1;
+    const m=[...moves].filter(e=>e.currency===c&&e.fx&&e.fx.to===b).sort((x,y)=>(y.date||"").localeCompare(x.date||""))[0];
+    return m?m.fx.rate:null; };
+  let pendFixedOut=0, pendFixedIn=0, paidFixedOut=0, projMiss=(co.miss+ci.miss)>0;
+  fixeds.forEach(t=>{
+    const kind=t.kind==="income"?"income":"expense";
+    const pm=fixedPaidMove(t, ym);
+    if(pm){
+      if(kind==="expense") paidFixedOut += pm.currency===b?principal(pm):(pm.fx&&pm.fx.to===b?pm.fx.amount:0);
+      return;
+    }
+    const r=knownRate(t.currency);
+    if(r==null){ projMiss=true; return; }
+    if(kind==="income") pendFixedIn+=principal(t)*r; else pendFixedOut+=principal(t)*r;
+  });
+  const varOut=Math.max(0, co.s-paidFixedOut);
+  const projOut=co.s + pendFixedOut + (varOut/Math.max(1,todayD))*(daysInMonth-todayD);
+  const projNet=(ci.s+pendFixedIn)-projOut;
+  const hasMonthData=mm.length>0 || fixeds.length>0;
+  const projHTML = hasMonthData ? `
+    <div class="proj">📈 Día ${todayD}/${daysInMonth} · a este ritmo cerrarás el mes:
+      gasto <span class="mono proj-out">≈ ${moneyApprox(projOut,b)}</span> ·
+      neto <span class="mono ${projNet>=0?'proj-pos':'proj-neg'}">≈ ${(projNet<0?"−":"")+moneyApprox(Math.abs(projNet),b)}</span>${projMiss?" *":""}</div>` : "";
   totEl.innerHTML = `
     <div class="group-lbl">${monthName} ${now.getFullYear()}</div>
     <div class="totals tri">
@@ -1388,11 +1429,11 @@ function renderMes(){
       <div class="stat collected"><div class="lbl">Ingresado</div><div class="val">${currencyHTML(inn)}</div>${showApx?apx(ci.s,ci.miss>0):''}</div>
       <div class="stat"><div class="lbl">Neto del mes</div><div class="val">${netHTML(net)}</div>${showApx?apx(ci.s-co.s,(co.miss+ci.miss)>0):''}</div>
     </div>
+    ${projHTML}
     <button class="cur-edit" onclick="changeBaseCur()" title="La moneda en la que se calculan los ≈ aproximados">Moneda base: ${b} ✎</button>
-    ${moves.length ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>` : ``}`;
+    ${moves.length ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>
+    <div class="hero" style="margin-top:10px"><div class="chart-lbl">Neto acumulado (${anyForeign?'≈ ':''}${b})</div><svg id="netChart" class="chart"></svg></div>` : ``}`;
   // fijos mensuales: pendientes/pagados de este mes
-  const fixeds=entries.filter(e=>e.type==="fixed").sort((a,b)=>(+a.day||1)-(+b.day||1));
-  const todayD=+today().slice(8,10);
   let overdueCount=0;
   const fixedHTML=fixeds.map(t=>{
     const kind=t.kind==="income"?"income":"expense";
@@ -1454,6 +1495,7 @@ function renderMes(){
   });
   listEl.innerHTML=fixedSection+html;
   drawMesChart(moves);
+  drawNetChart(moves);
 }
 // punto rojo en la pestaña Mi mes cuando hay fijos vencidos sin pagar
 function updateMesTabDot(n){
@@ -1490,6 +1532,47 @@ function drawMesChart(moves){
            `<rect class="inn" x="${(x+bw+3).toFixed(1)}" y="${H-20-hi}" width="${bw.toFixed(1)}" height="${Math.max(hi,2)}" rx="2" opacity="${b.inn?0.9:0.15}"></rect>`+
            `<text x="${(x+slot/2).toFixed(1)}" y="${H-5}" text-anchor="middle">${b.label}</text>`;
   }).join("");
+}
+// curva de neto acumulado (≈ moneda base): tu economía como una sola línea.
+// Arrastra TODO el histórico anterior a la ventana para que el nivel sea real.
+function drawNetChart(moves){
+  const svg=document.getElementById("netChart"); if(!svg) return;
+  const base=baseCur();
+  const conv=e=>{ if(e.currency===base) return principal(e); if(e.fx&&e.fx.to===base) return e.fx.amount; return null; };
+  const now=new Date(), buckets=[];
+  for(let k=5;k>=0;k--){
+    const d=new Date(now.getFullYear(), now.getMonth()-k, 1);
+    buckets.push({ ym:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label:MONTHS[d.getMonth()], net:0 });
+  }
+  let before=0;
+  moves.forEach(e=>{
+    const v=conv(e); if(v==null) return;
+    const s=e.type==="expense"?-v:v;
+    const eym=(e.date||"").slice(0,7);
+    if(eym<buckets[0].ym) before+=s;
+    else { const bkt=buckets.find(x=>x.ym===eym); if(bkt) bkt.net+=s; }
+  });
+  let acc=before;
+  const pts=buckets.map(bkt=>{ acc+=bkt.net; return acc; });
+  const W=Math.max(220, Math.round(svg.getBoundingClientRect().width || 300)), H=92;
+  const top=12, baseY=H-20;
+  const lo=Math.min(0,...pts), hi=Math.max(0,...pts), span=Math.max(1,hi-lo);
+  const Y=v=> baseY-((v-lo)/span)*(baseY-top);
+  const X=i=> (i+0.5)*(W/pts.length);
+  const line=pts.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+  const area=`M${X(0).toFixed(1)},${baseY} L${line.split(" ").join(" L")} L${X(pts.length-1).toFixed(1)},${baseY} Z`;
+  const last=pts[pts.length-1];
+  const lastLbl=(last<0?"−":"")+moneyApprox(Math.abs(last),base);
+  const lblX=Math.min(X(pts.length-1), W-8); // que la cifra final no se salga
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML =
+    `<line class="base" x1="0" x2="${W}" y1="${H-19.5}" y2="${H-19.5}"></line>`+
+    (lo<0?`<line class="zero" x1="0" x2="${W}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"></line>`:"")+
+    `<path class="netarea" d="${area}"></path>`+
+    `<polyline class="netline" points="${line}"></polyline>`+
+    `<circle class="netdot" cx="${X(pts.length-1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="3.5"></circle>`+
+    `<text class="netlbl" x="${lblX.toFixed(1)}" y="${Math.max(top-2,Y(last)-8).toFixed(1)}" text-anchor="end">${lastLbl}</text>`+
+    buckets.map((bkt,i)=>`<text x="${X(i).toFixed(1)}" y="${H-5}" text-anchor="middle">${bkt.label}</text>`).join("");
 }
 /* pestañas */
 let curTab = "cuentas";
@@ -1861,7 +1944,7 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v33";
+const APP_VERSION = "v34";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
