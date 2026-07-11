@@ -49,6 +49,13 @@
   .mv-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
   .mv-approx{font-size:10.5px;color:var(--dim);white-space:nowrap}
   .stat-approx{font-size:11px;color:var(--dim);margin-top:4px}
+  /* fijos mensuales */
+  .fixedrow .mv-ico{background:rgba(204,255,0,.10);color:var(--acc)}
+  :root[data-theme="light"] .fixedrow .mv-ico{background:rgba(92,118,0,.08)}
+  .fixedrow.fdone{opacity:.62}
+  .mv-date.f-overdue,.mv-date.f-overdue .edit-btn{color:var(--red);font-weight:600}
+  .fixpay{padding:5px 0 0;font-size:11.5px}
+  .tab-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:3px;vertical-align:2px}
   .mv.expense .mv-amt{color:var(--red)}
   .mv.income .mv-amt{color:var(--green)}
   .theme-btn{background:var(--bg2);border:1px solid var(--line);color:var(--ink);width:34px;height:34px;border-radius:10px;font-size:15px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -426,6 +433,24 @@
   </div>
 </dialog>
 
+<dialog id="dlgFixed">
+  <h2>↻ Fijo mensual</h2>
+  <p class="hint">Se repite cada mes: aparece pendiente hasta que lo marcas con un toque (crea el movimiento con la fecha real y su ≈ del día).</p>
+  <input id="f_concept" placeholder="¿Qué es? (alquiler, gym, sueldo…)" autocomplete="off">
+  <div class="two">
+    <input id="f_amount" type="number" inputmode="decimal" placeholder="Importe">
+    <select id="f_cur" class="cur-select"></select>
+  </div>
+  <div class="two">
+    <select id="f_kind"><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
+    <input id="f_day" type="number" inputmode="numeric" min="1" max="31" placeholder="Día del mes (1–31)">
+  </div>
+  <div class="dlg-actions">
+    <button class="btn cancel" onclick="dlgFixed.close()">Cancelar</button>
+    <button class="btn" onclick="saveFixed()">Guardar</button>
+  </div>
+</dialog>
+
 <dialog id="dlgImport">
   <h2>✨ Importar</h2>
   <div id="imp_step1">
@@ -705,6 +730,11 @@ function normalize(data){
       e.items = Array.isArray(e.items) ? e.items : [];
       e.payments = Array.isArray(e.payments) ? e.payments : [];
       e.deletedPays = Array.isArray(e.deletedPays) ? e.deletedPays : [];
+      // fijos mensuales: día de vencimiento válido y tipo de flujo por defecto
+      if(e.type==="fixed"){
+        if(e.kind!=="income") e.kind="expense";
+        e.day=Math.min(Math.max(parseInt(e.day,10)||1,1),31);
+      }
       // cada pago debe tener id estable (para fusionar sin perder ni duplicar)
       e.payments.forEach((p,idx)=>{ if(p && !p.id) p.id = legacyPayId(e.id, p, idx); });
       e.items.forEach(i=>{ if(i && i.name==="Coffee") i.name="Coffee machine"; });
@@ -811,7 +841,7 @@ function netHTML(m){
   }).join("");
 }
 function dominantCurrency(list){
-  const src = list || entries.filter(e=>!isMove(e)); // por defecto solo cuentas (los movimientos no distorsionan)
+  const src = list || entries.filter(e=>e.type==="sale"||e.type==="debt"); // solo cuentas (ni movimientos ni fijos distorsionan)
   const c={}; src.forEach(e=>{ c[e.currency]=(c[e.currency]||0)+1; });
   let best="AUD", n=-1; Object.keys(c).forEach(k=>{ if(c[k]>n){ n=c[k]; best=k; } });
   return best;
@@ -1092,7 +1122,7 @@ async function delEntry(id){
   const removed=entries[idx];
   entries.splice(idx,1);
   await save(); render();
-  const tipo = removed.type==="sale" ? "Venta" : removed.type==="debt" ? "Deuda" : removed.type==="expense" ? "Gasto" : "Ingreso";
+  const tipo = removed.type==="sale" ? "Venta" : removed.type==="debt" ? "Deuda" : removed.type==="fixed" ? "Fijo" : removed.type==="expense" ? "Gasto" : "Ingreso";
   showUndo(tipo+" «"+removed.party+"» borrado", async ()=>{
     entries.splice(Math.min(idx, entries.length), 0, removed);
     await save(); render();
@@ -1183,7 +1213,7 @@ async function editItemCost(id,idx){
 // rellena las sugerencias de nombres (personas ya registradas) para el autocompletado
 function fillPartyList(){
   const dl=document.getElementById("partyList"); if(!dl) return;
-  const names=[...new Set(entries.filter(e=>!isMove(e)).map(e=>e.party).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const names=[...new Set(entries.filter(e=>e.type==="sale"||e.type==="debt").map(e=>e.party).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   dl.innerHTML = names.map(n=>`<option value="${esc(n)}"></option>`).join("");
 }
 function openNew(type){
@@ -1278,6 +1308,50 @@ async function editMoveDate(id){
   if(v===null || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
   e.date=v; await save(); render(); backfillFx();
 }
+
+/* ——— fijos mensuales: plantillas que se repiten cada mes ——— */
+function openFixed(){
+  document.getElementById("f_concept").value="";
+  document.getElementById("f_amount").value="";
+  document.getElementById("f_cur").value=Store.get("last_cur")||"AUD";
+  document.getElementById("f_kind").value="expense";
+  document.getElementById("f_day").value="1";
+  dlgFixed.showModal();
+}
+async function saveFixed(){
+  const p=document.getElementById("f_concept").value.trim();
+  const amt=parseFloat(document.getElementById("f_amount").value);
+  const day=parseInt(document.getElementById("f_day").value,10);
+  if(!p){ document.getElementById("f_concept").focus(); return; }
+  if(!amt||amt<=0){ document.getElementById("f_amount").focus(); return; }
+  if(!day||day<1||day>31){ document.getElementById("f_day").focus(); return; }
+  const cur=document.getElementById("f_cur").value||"AUD";
+  const kind=document.getElementById("f_kind").value==="income"?"income":"expense";
+  Store.set("last_cur",cur);
+  entries.push({id:"f-"+Date.now(), type:"fixed", kind, party:p, principal:amt, currency:cur, day, date:today(), payments:[], deletedPays:[]});
+  await save(); render(); dlgFixed.close();
+}
+// marca el fijo del mes como pagado: crea el movimiento real (fecha de hoy,
+// enlazado a la plantilla) y el ≈ en moneda base llega con backfillFx.
+async function payFixed(id){
+  const t=entries.find(x=>x.id===id); if(!t) return;
+  const kind=t.kind==="income"?"income":"expense";
+  entries.unshift({id:"m-"+Date.now(), type:kind, party:t.party, date:today(), currency:t.currency, principal:principal(t), payments:[], deletedPays:[], fixed:t.id});
+  await save(); render(); backfillFx();
+}
+async function editFixedDay(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("Día del mes en que vence (1–31)", e.day||1, {number:true}); if(v===null) return;
+  const d=parseInt(v,10); if(!d||d<1||d>31) return;
+  e.day=d; await save(); render();
+}
+// el movimiento de este mes que corresponde a un fijo (por enlace o por
+// nombre+moneda+tipo, para no duplicar lo que ya registraste a mano)
+function fixedPaidMove(t, ym){
+  const kind=t.kind==="income"?"income":"expense";
+  return entries.find(m=>isMove(m) && (m.date||"").slice(0,7)===ym &&
+    (m.fixed===t.id || ((m.party||"").trim().toLowerCase()===(t.party||"").trim().toLowerCase() && m.currency===t.currency && m.type===kind)));
+}
 // suma de movimientos por moneda en un mes dado (ym = "2026-07")
 function movesByCur(moves, ym, type){
   const m={};
@@ -1316,14 +1390,45 @@ function renderMes(){
     </div>
     <button class="cur-edit" onclick="changeBaseCur()" title="La moneda en la que se calculan los ≈ aproximados">Moneda base: ${b} ✎</button>
     ${moves.length ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>` : ``}`;
+  // fijos mensuales: pendientes/pagados de este mes
+  const fixeds=entries.filter(e=>e.type==="fixed").sort((a,b)=>(+a.day||1)-(+b.day||1));
+  const todayD=+today().slice(8,10);
+  let overdueCount=0;
+  const fixedHTML=fixeds.map(t=>{
+    const kind=t.kind==="income"?"income":"expense";
+    const pm=fixedPaidMove(t, ym);
+    const day=t.day||1;
+    const overdue=!pm && todayD>day;
+    if(overdue) overdueCount++;
+    const status = pm ? `✓ ${kind==="income"?"Recibido":"Pagado"} el ${niceDate(pm.date)}`
+      : (overdue ? `venció el ${day} · pendiente` : `vence el día ${day}`);
+    return `<div class="mv fixedrow ${kind} ${pm?'fdone':''}">
+      <span class="mv-ico">↻</span>
+      <div class="mv-main">
+        <div class="mv-concept"><button class="edit-btn" onclick="renameMove('${t.id}')" title="Editar nombre">${esc(t.party)}<span class="ed">✎</span></button></div>
+        <div class="mv-date${overdue?' f-overdue':''}"><button class="edit-btn" onclick="editFixedDay('${t.id}')" title="Editar día del mes">${status}<span class="ed">✎</span></button></div>
+      </div>
+      <span class="mv-right">
+        <button class="edit-btn mono mv-amt" onclick="editMoveAmount('${t.id}')" title="Editar importe">${kind==='expense'?'−':'+'}${money(principal(t),t.currency)}</button>
+        ${pm?'':`<button class="quick fixpay" onclick="payFixed('${t.id}')">✓ ${kind==="income"?"recibido hoy":"pagar ahora"}</button>`}
+      </span>
+      <button class="pay-del" onclick="delEntry('${t.id}')">×</button>
+    </div>`;
+  }).join("");
+  updateMesTabDot(overdueCount);
   // lista de movimientos agrupada por mes (más reciente primero)
-  if(!moves.length){
+  if(!moves.length && !fixeds.length){
     listEl.innerHTML = `<div class="onboard"><div class="onboard-emoji">💰</div>
       <div class="onboard-title">Tu economía del mes</div>
       <div class="onboard-sub">Registra gastos (alquiler, comida…) e ingresos, y mira tu mes de un vistazo.</div>
-      <button class="btn onboard-btn" onclick="openMove('expense')">− Añadir gasto</button></div>`;
+      <button class="btn onboard-btn" onclick="openMove('expense')">− Añadir gasto</button>
+      <button class="quick" onclick="openFixed()" style="text-align:center;width:100%">↻ o crea un fijo mensual (alquiler…)</button></div>`;
     return;
   }
+  const fixedSection = `
+    <div class="group-lbl">Fijos mensuales</div>
+    ${fixedHTML || `<div class="empty">Sin fijos aún. Añade el alquiler y márcalo pagado cada mes con un toque.</div>`}
+    <button class="quick" onclick="openFixed()">+ añadir fijo mensual</button>`;
   const sorted=[...moves].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.id>a.id?1:-1));
   let html="", lastYm="";
   sorted.forEach(e=>{
@@ -1347,8 +1452,13 @@ function renderMes(){
       <button class="pay-del" onclick="delEntry('${e.id}')">×</button>
     </div>`;
   });
-  listEl.innerHTML=html;
+  listEl.innerHTML=fixedSection+html;
   drawMesChart(moves);
+}
+// punto rojo en la pestaña Mi mes cuando hay fijos vencidos sin pagar
+function updateMesTabDot(n){
+  const el=document.getElementById("tabMes"); if(!el) return;
+  el.innerHTML = "💰 Mi mes" + (n ? ' <span class="tab-dot"></span>' : "");
 }
 // gráfico de flujo mensual: dos barras por mes (gasto en rojo, ingreso en verde),
 // todo convertido a la moneda base con el snapshot de cada movimiento
@@ -1751,7 +1861,7 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v32";
+const APP_VERSION = "v33";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
