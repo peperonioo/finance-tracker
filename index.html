@@ -36,6 +36,18 @@
   .ver{color:var(--faint);letter-spacing:.06em;font-weight:600}
   h1{font-size:26px;font-weight:800;letter-spacing:-.01em}
   .head-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  /* pestañas: Cuentas (con gente) / Mi mes (economía personal) */
+  .tabs{display:flex;gap:8px;margin:14px 0 4px}
+  .tab{flex:1;background:var(--bg2);border:1px solid var(--line);border-radius:12px;color:var(--dim);padding:11px;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit;transition:color .15s,border-color .15s}
+  .tab.on{color:var(--acc);border-color:var(--acc)}
+  /* movimientos (gastos/ingresos) — filas compactas */
+  .mv{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:8px}
+  .mv .mv-main{flex:1;min-width:0}
+  .mv .mv-concept{font-size:14.5px;font-weight:600}
+  .mv .mv-date{font-size:11px;color:var(--dim);margin-top:1px}
+  .mv .mv-amt{font-weight:700;white-space:nowrap}
+  .mv.expense .mv-amt{color:var(--red)}
+  .mv.income .mv-amt{color:var(--green)}
   .theme-btn{background:var(--bg2);border:1px solid var(--line);color:var(--ink);width:34px;height:34px;border-radius:10px;font-size:15px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .theme-btn:hover{border-color:var(--acc)}
 
@@ -53,6 +65,8 @@
   .chart-lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:16px 0 6px}
   .chart{width:100%;height:92px;display:block}
   .chart rect{fill:var(--lime)}
+  .chart rect.out{fill:var(--red)}
+  .chart rect.inn{fill:var(--green)}
   .chart text{fill:var(--dim);font-size:9px;font-family:inherit}
   .chart .hit{fill:transparent;cursor:pointer}
   .chart-tip{text-align:center;font-size:11.5px;color:var(--acc);margin-top:8px;min-height:16px;opacity:0;transition:opacity .15s}
@@ -243,26 +257,42 @@
     <div class="eyebrow">Finance Tracker <span class="ver" id="ver"></span></div>
     <button id="themeBtn" class="theme-btn" onclick="toggleTheme()" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema claro/oscuro">☾</button>
   </div>
-  <h1>Ventas y deudas</h1>
+  <h1 id="h1">Ventas y deudas</h1>
+  <div class="tabs">
+    <button class="tab on" id="tabCuentas" onclick="switchTab('cuentas')">📒 Cuentas</button>
+    <button class="tab" id="tabMes" onclick="switchTab('mes')">💰 Mi mes</button>
+  </div>
 </header>
 
-<div id="totals"></div>
-<div id="toolbar" class="toolbar" style="display:none">
-  <input id="q" class="search" placeholder="Buscar por nombre o artículo…" autocomplete="off" oninput="onSearch(this.value)">
-  <select id="sortSel" class="sort-select" onchange="onSort(this.value)">
-    <option value="recent">Recientes</option>
-    <option value="old">Más antiguo</option>
-    <option value="amount">Mayor importe</option>
-    <option value="pending">Pendientes 1º</option>
-  </select>
-</div>
-<div id="app"><div class="loading">Cargando…</div></div>
+<div id="tab-cuentas">
+  <div id="totals"></div>
+  <div id="toolbar" class="toolbar" style="display:none">
+    <input id="q" class="search" placeholder="Buscar por nombre o artículo…" autocomplete="off" oninput="onSearch(this.value)">
+    <select id="sortSel" class="sort-select" onchange="onSort(this.value)">
+      <option value="recent">Recientes</option>
+      <option value="old">Más antiguo</option>
+      <option value="amount">Mayor importe</option>
+      <option value="pending">Pendientes 1º</option>
+    </select>
+  </div>
+  <div id="app"><div class="loading">Cargando…</div></div>
 
-<div class="addbtns">
-  <button class="btn ghost" onclick="openNew('sale')">+ Venta</button>
-  <button class="btn ghost" onclick="openNew('debt')">+ Deuda</button>
+  <div class="addbtns">
+    <button class="btn ghost" onclick="openNew('sale')">+ Venta</button>
+    <button class="btn ghost" onclick="openNew('debt')">+ Deuda</button>
+  </div>
+  <button class="btn ghost wide" onclick="openImport()">✨ Importar de texto o foto</button>
 </div>
-<button class="btn ghost wide" onclick="openImport()">✨ Importar de texto o foto</button>
+
+<div id="tab-mes" style="display:none">
+  <div id="mesTotals"></div>
+  <div id="mesList"></div>
+  <div class="addbtns">
+    <button class="btn ghost" onclick="openMove('expense')">− Gasto</button>
+    <button class="btn ghost" onclick="openMove('income')">+ Ingreso</button>
+  </div>
+</div>
+
 <button class="btn ghost wide" onclick="openSync()"><span id="syncBadge">☁︎ Sincronizar en la nube</span></button>
 
 <div class="backup">
@@ -303,6 +333,20 @@
   <div class="dlg-actions">
     <button class="btn cancel" onclick="dlgDebt.close()">Cancelar</button>
     <button class="btn" onclick="saveDebt()">Guardar</button>
+  </div>
+</dialog>
+
+<dialog id="dlgMove">
+  <h2 id="m_title">Nuevo gasto</h2>
+  <input id="m_concept" placeholder="¿En qué? (alquiler, comida…)" autocomplete="off">
+  <div class="two">
+    <input id="m_amount" type="number" inputmode="decimal" placeholder="Importe">
+    <select id="m_cur" class="cur-select"></select>
+  </div>
+  <label class="pay-date-row">Fecha <input id="m_date" type="date"></label>
+  <div class="dlg-actions">
+    <button class="btn cancel" onclick="dlgMove.close()">Cancelar</button>
+    <button class="btn" onclick="saveMove()">Guardar</button>
   </div>
 </dialog>
 
@@ -496,8 +540,8 @@ function relTime(ts){
   const h=Math.floor(m/60); if(h<24) return "hace "+h+" h";
   const d=Math.floor(h/24); return "hace "+d+" día"+(d>1?"s":"");
 }
-const CURRENCIES = ["AUD","USD","EUR","GBP","NZD","CAD","MXN","COP","ARS","BRL","CLP","JPY"];
-const SYMBOLS = {AUD:"A$",USD:"US$",EUR:"€",GBP:"£",NZD:"NZ$",CAD:"C$",MXN:"MX$",COP:"COP$",ARS:"AR$",BRL:"R$",CLP:"CLP$",JPY:"¥"};
+const CURRENCIES = ["AUD","USD","EUR","IDR","GBP","NZD","CAD","MXN","COP","ARS","BRL","CLP","JPY"];
+const SYMBOLS = {AUD:"A$",USD:"US$",EUR:"€",IDR:"Rp ",GBP:"£",NZD:"NZ$",CAD:"C$",MXN:"MX$",COP:"COP$",ARS:"AR$",BRL:"R$",CLP:"CLP$",JPY:"¥"};
 const sym = c => SYMBOLS[c] || ((c||"")+" ");
 const money = (n,c) => sym(c)+fmt(n);
 const esc = t => (t+"").replace(/[<>&]/g,x=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[x]));
@@ -515,6 +559,8 @@ const Store = {
 const principal = e => e.type==="sale" ? e.items.reduce((a,i)=>a+(+i.price||0),0) : (+e.principal||0);
 const paid = e => e.payments.reduce((a,p)=>a+(+p.amount||0),0);
 const balance = e => principal(e) - paid(e);
+// movimientos de "Mi mes" (gastos/ingresos personales): no son cuentas con gente
+const isMove = e => e && (e.type==="expense" || e.type==="income");
 
 function save(touch=true){
   Store.set("entries", JSON.stringify(entries));
@@ -639,8 +685,9 @@ function netHTML(m){
     return `<span class="sub mono cu ${cls}" data-key="neto-${c}" data-to="${Math.abs(v)}" data-cur="${c}" data-sign="${v<0?'−':''}">${(v<0?"−":"")+money(Math.abs(v),c)}</span>`;
   }).join("");
 }
-function dominantCurrency(){
-  const c={}; entries.forEach(e=>{ c[e.currency]=(c[e.currency]||0)+1; });
+function dominantCurrency(list){
+  const src = list || entries.filter(e=>!isMove(e)); // por defecto solo cuentas (los movimientos no distorsionan)
+  const c={}; src.forEach(e=>{ c[e.currency]=(c[e.currency]||0)+1; });
   let best="AUD", n=-1; Object.keys(c).forEach(k=>{ if(c[k]>n){ n=c[k]; best=k; } });
   return best;
 }
@@ -673,7 +720,7 @@ function drawChart(){
   }).join("");
 }
 let _chartRz=null;
-window.addEventListener("resize", ()=>{ clearTimeout(_chartRz); _chartRz=setTimeout(drawChart, 120); });
+window.addEventListener("resize", ()=>{ clearTimeout(_chartRz); _chartRz=setTimeout(()=>{ drawChart(); if(typeof renderMes==="function" && curTab==="mes") renderMes(); }, 120); });
 let lastSeries=[], lastChartCur="AUD", chartTipT=null;
 function chartTap(i){
   const s=lastSeries[i], el=document.getElementById("chartTip");
@@ -751,6 +798,7 @@ function render(intro){
     totalsEl.innerHTML = "";
     if(toolbar) toolbar.style.display = "none";
     document.getElementById("app").innerHTML = onboardingHTML();
+    renderMes();
     introMode = false; updateBackupHint(); return;
   }
   const sales = entries.filter(e=>e.type==="sale");
@@ -784,6 +832,7 @@ function render(intro){
   drawChart(); // dibuja el gráfico a escala real (nítido) una vez montado en el DOM
   if(toolbar) toolbar.style.display = entries.length>=3 ? "" : "none";
   renderList();
+  renderMes(); // mantiene la pestaña "Mi mes" al día con cualquier cambio
   introMode = false; // la entrada escalonada solo se aplica una vez
   updateBackupHint();
   updateSyncBadge();
@@ -916,8 +965,8 @@ async function delEntry(id){
   const removed=entries[idx];
   entries.splice(idx,1);
   await save(); render();
-  const tipo = removed.type==="sale" ? "Venta" : "Deuda";
-  showUndo(tipo+" de «"+removed.party+"» borrada", async ()=>{
+  const tipo = removed.type==="sale" ? "Venta" : removed.type==="debt" ? "Deuda" : removed.type==="expense" ? "Gasto" : "Ingreso";
+  showUndo(tipo+" «"+removed.party+"» borrado", async ()=>{
     entries.splice(Math.min(idx, entries.length), 0, removed);
     await save(); render();
   });
@@ -1007,7 +1056,7 @@ async function editItemCost(id,idx){
 // rellena las sugerencias de nombres (personas ya registradas) para el autocompletado
 function fillPartyList(){
   const dl=document.getElementById("partyList"); if(!dl) return;
-  const names=[...new Set(entries.map(e=>e.party).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const names=[...new Set(entries.filter(e=>!isMove(e)).map(e=>e.party).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   dl.innerHTML = names.map(n=>`<option value="${esc(n)}"></option>`).join("");
 }
 function openNew(type){
@@ -1059,6 +1108,139 @@ async function saveDebt(){
   const id="d-"+Date.now();
   entries.push({id,type:"debt",party:who,date:today(),currency:cur,principal:amt,concept,payments:[],_open:true});
   await save(); render(); dlgDebt.close(); pulse(id);
+}
+
+/* ——— Mi mes: gastos e ingresos personales ——— */
+let moveType="expense";
+function openMove(type){
+  moveType=type;
+  document.getElementById("m_title").textContent = type==="expense" ? "Nuevo gasto" : "Nuevo ingreso";
+  document.getElementById("m_concept").value="";
+  document.getElementById("m_amount").value="";
+  document.getElementById("m_cur").value = Store.get("last_cur") || "AUD";
+  document.getElementById("m_date").value = today();
+  dlgMove.showModal();
+}
+async function saveMove(){
+  const concept=document.getElementById("m_concept").value.trim();
+  const amt=parseFloat(document.getElementById("m_amount").value);
+  if(!concept){ document.getElementById("m_concept").focus(); return; }
+  if(!amt||amt<=0){ document.getElementById("m_amount").focus(); return; }
+  const cur=document.getElementById("m_cur").value||"AUD";
+  let d=document.getElementById("m_date").value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d||"")) d=today();
+  Store.set("last_cur", cur);
+  entries.unshift({id:"m-"+Date.now(),type:moveType,party:concept,date:d,currency:cur,principal:amt,payments:[],deletedPays:[]});
+  await save(); render(); dlgMove.close();
+}
+async function renameMove(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("Concepto", e.party); if(v===null||!v.trim()) return;
+  e.party=v.trim(); await save(); render();
+}
+async function editMoveAmount(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("Importe", e.principal, {number:true}); if(v===null) return;
+  const n=parseFloat(v); if(!n||n<=0) return;
+  e.principal=n; await save(); render();
+}
+async function editMoveDate(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("Fecha", e.date||today(), {date:true});
+  if(v===null || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+  e.date=v; await save(); render();
+}
+// suma de movimientos por moneda en un mes dado (ym = "2026-07")
+function movesByCur(moves, ym, type){
+  const m={};
+  moves.filter(e=>e.type===type && (e.date||"").slice(0,7)===ym)
+       .forEach(e=>{ m[e.currency]=(m[e.currency]||0)+principal(e); });
+  return m;
+}
+function renderMes(){
+  const totEl=document.getElementById("mesTotals"), listEl=document.getElementById("mesList");
+  if(!totEl||!listEl) return;
+  const moves=entries.filter(isMove);
+  const ym=today().slice(0,7);
+  const out=movesByCur(moves, ym, "expense"), inn=movesByCur(moves, ym, "income");
+  const net={};
+  Object.keys(inn).forEach(c=>net[c]=(net[c]||0)+inn[c]);
+  Object.keys(out).forEach(c=>net[c]=(net[c]||0)-out[c]);
+  const now=new Date();
+  const monthName=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][now.getMonth()];
+  totEl.innerHTML = `
+    <div class="group-lbl">${monthName} ${now.getFullYear()}</div>
+    <div class="totals tri">
+      <div class="stat returned"><div class="lbl">Gastado</div><div class="val">${currencyHTML(out)}</div></div>
+      <div class="stat collected"><div class="lbl">Ingresado</div><div class="val">${currencyHTML(inn)}</div></div>
+      <div class="stat"><div class="lbl">Neto del mes</div><div class="val">${netHTML(net)}</div></div>
+    </div>
+    ${moves.length ? `<div class="hero"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${dominantCurrency(moves)})</div><svg id="mesChart" class="chart"></svg></div>` : ``}`;
+  // lista de movimientos agrupada por mes (más reciente primero)
+  if(!moves.length){
+    listEl.innerHTML = `<div class="onboard"><div class="onboard-emoji">💰</div>
+      <div class="onboard-title">Tu economía del mes</div>
+      <div class="onboard-sub">Registra gastos (alquiler, comida…) e ingresos, y mira tu mes de un vistazo.</div>
+      <button class="btn onboard-btn" onclick="openMove('expense')">− Añadir gasto</button></div>`;
+    return;
+  }
+  const sorted=[...moves].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.id>a.id?1:-1));
+  let html="", lastYm="";
+  sorted.forEach(e=>{
+    const eym=(e.date||"").slice(0,7);
+    if(eym!==lastYm){
+      lastYm=eym;
+      const [y,mo]=eym.split("-");
+      html+=`<div class="group-lbl">${MONTHS[+mo-1]} '${y.slice(2)}</div>`;
+    }
+    const sign=e.type==="expense"?"−":"+";
+    html+=`<div class="mv ${e.type}">
+      <div class="mv-main">
+        <div class="mv-concept"><button class="edit-btn" onclick="renameMove('${e.id}')" title="Editar concepto">${esc(e.party)}<span class="ed">✎</span></button></div>
+        <div class="mv-date"><button class="edit-btn" onclick="editMoveDate('${e.id}')" title="Editar fecha">${niceDate(e.date)}<span class="ed">✎</span></button></div>
+      </div>
+      <button class="edit-btn mono mv-amt" onclick="editMoveAmount('${e.id}')" title="Editar importe">${sign}${money(principal(e),e.currency)}</button>
+      <button class="pay-del" onclick="delEntry('${e.id}')">×</button>
+    </div>`;
+  });
+  listEl.innerHTML=html;
+  drawMesChart(moves);
+}
+// gráfico de flujo mensual: dos barras por mes (gasto en rojo, ingreso en verde)
+function drawMesChart(moves){
+  const svg=document.getElementById("mesChart"); if(!svg) return;
+  const cur=dominantCurrency(moves);
+  const now=new Date(), buckets=[];
+  for(let k=5;k>=0;k--){
+    const d=new Date(now.getFullYear(), now.getMonth()-k, 1);
+    buckets.push({ ym:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label:MONTHS[d.getMonth()], out:0, inn:0 });
+  }
+  moves.filter(e=>e.currency===cur).forEach(e=>{
+    const b=buckets.find(x=>x.ym===(e.date||"").slice(0,7)); if(!b) return;
+    if(e.type==="expense") b.out+=principal(e); else b.inn+=principal(e);
+  });
+  const W=Math.max(220, Math.round(svg.getBoundingClientRect().width || 300)), H=92;
+  const max=Math.max(1, ...buckets.map(b=>Math.max(b.out,b.inn)));
+  const n=buckets.length, gap=Math.max(8, Math.round(W*0.03)), slot=(W-gap*(n-1))/n, bw=(slot-3)/2;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = buckets.map((b,i)=>{
+    const x=i*(slot+gap);
+    const ho=Math.round((b.out/max)*(H-24)), hi=Math.round((b.inn/max)*(H-24));
+    return `<rect class="out" x="${x.toFixed(1)}" y="${H-20-ho}" width="${bw.toFixed(1)}" height="${Math.max(ho,2)}" rx="2" opacity="${b.out?0.9:0.15}"></rect>`+
+           `<rect class="inn" x="${(x+bw+3).toFixed(1)}" y="${H-20-hi}" width="${bw.toFixed(1)}" height="${Math.max(hi,2)}" rx="2" opacity="${b.inn?0.9:0.15}"></rect>`+
+           `<text x="${(x+slot/2).toFixed(1)}" y="${H-5}" text-anchor="middle">${b.label}</text>`;
+  }).join("");
+}
+/* pestañas */
+let curTab = "cuentas";
+function switchTab(t){
+  curTab=t; Store.set("tab", t);
+  document.getElementById("tab-cuentas").style.display = t==="cuentas" ? "" : "none";
+  document.getElementById("tab-mes").style.display = t==="mes" ? "" : "none";
+  document.getElementById("tabCuentas").classList.toggle("on", t==="cuentas");
+  document.getElementById("tabMes").classList.toggle("on", t==="mes");
+  document.getElementById("h1").textContent = t==="cuentas" ? "Ventas y deudas" : "Mi mes";
+  if(t==="mes") renderMes(); else drawChart(); // el gráfico se mide al hacerse visible
 }
 
 /* copia de seguridad */
@@ -1417,9 +1599,10 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v29";
+const APP_VERSION = "v30";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
+switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
 updateSyncBadge();
 setInterval(updateSyncBadge, 60000); // refresca el "hace N min" del estado de sync
 
