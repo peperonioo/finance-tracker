@@ -46,6 +46,9 @@
   .mv .mv-concept{font-size:14.5px;font-weight:600}
   .mv .mv-date{font-size:11px;color:var(--dim);margin-top:1px}
   .mv .mv-amt{font-weight:700;white-space:nowrap}
+  .mv-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .mv-approx{font-size:10.5px;color:var(--dim);white-space:nowrap}
+  .stat-approx{font-size:11px;color:var(--dim);margin-top:4px}
   .mv.expense .mv-amt{color:var(--red)}
   .mv.income .mv-amt{color:var(--green)}
   .theme-btn{background:var(--bg2);border:1px solid var(--line);color:var(--ink);width:34px;height:34px;border-radius:10px;font-size:15px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -604,6 +607,54 @@ function daysSince(iso){
   const ms=Date.parse(today())-Date.parse(iso||today());
   return isNaN(ms)?0:Math.max(0, Math.floor(ms/86400000));
 }
+/* ——— tipo de cambio: snapshot ≈ en tu moneda base, congelado al día del gasto ——— */
+const baseCur = () => Store.get("base_cur") || "USD";
+const moneyApprox = (n,c) => sym(c) + (Math.abs(n)>=1000 ? fmt(n) : (+n.toFixed(2)).toLocaleString("en-AU"));
+async function fetchRate(from,to,date){
+  // Se pide to→from y se invierte: el API redondea a 5 decimales y en pares
+  // como IDR→USD (0.000055) eso pierde ~1% de precisión; USD→IDR (18.077) no.
+  try{
+    const r=await fetch(`https://api.frankfurter.dev/v1/${date}?base=${to}&symbols=${from}`);
+    if(r.ok){ const j=await r.json(); const v=j&&j.rates&&j.rates[from]; if(v) return {rate:1/v, day:j.date||date, hist:true}; }
+  }catch(e){}
+  try{ // monedas fuera del BCE (COP/ARS/CLP…): tipo actual, no histórico
+    const r=await fetch(`https://open.er-api.com/v6/latest/${to}`);
+    if(r.ok){ const j=await r.json(); const v=j&&j.rates&&j.rates[from]; if(v) return {rate:1/v, day:"actual", hist:false}; }
+  }catch(e){}
+  return null;
+}
+// Asegura el snapshot de un movimiento (devuelve true si cambió algo).
+// El tipo queda CONGELADO con la fecha del gasto; editar importe recalcula sin
+// refetch (mismo tipo); editar fecha o moneda vuelve a consultar.
+async function ensureFx(e){
+  if(!isMove(e)) return false;
+  const to=baseCur(), amt=principal(e);
+  if(e.currency===to){ if(e.fx){ delete e.fx; return true; } return false; }
+  if(e.fx && e.fx.to===to && e.fx.date===e.date){
+    if(e.fx.for!==amt){ e.fx.amount=amt*e.fx.rate; e.fx.for=amt; return true; }
+    return false;
+  }
+  const got=await fetchRate(e.currency, to, e.date||today());
+  if(!got) return false;
+  e.fx={ to, rate:got.rate, amount:amt*got.rate, date:e.date, for:amt, day:got.day };
+  return true;
+}
+let fxBusy=false;
+async function backfillFx(){
+  if(fxBusy || !navigator.onLine) return;
+  fxBusy=true;
+  try{
+    let changed=false;
+    for(const e of entries.filter(isMove)){ if(await ensureFx(e)) changed=true; }
+    if(changed){ await save(); render(); }
+  }finally{ fxBusy=false; }
+}
+async function changeBaseCur(){
+  const v=await askChoose("Moneda base (para el ≈ aproximado)", CURRENCIES, baseCur());
+  if(!v) return;
+  Store.set("base_cur", v);
+  render(); backfillFx();
+}
 // tiempo relativo legible para el estado de sincronización
 function relTime(ts){
   if(!ts) return "";
@@ -695,6 +746,7 @@ function load(){
   save(false); // no marca cambio ni sincroniza (solo persiste el estado cargado)
   render(true); // entrada escalonada en la primera carga
   if(syncConfigured()) cloudSync(true); // baja cambios de la nube al abrir
+  backfillFx(); // rellena los ≈ de movimientos que aún no tengan tipo de cambio
 }
 
 function seedTristan(){
@@ -1207,6 +1259,7 @@ async function saveMove(){
   Store.set("last_cur", cur);
   entries.unshift({id:"m-"+Date.now(),type:moveType,party:concept,date:d,currency:cur,principal:amt,payments:[],deletedPays:[]});
   await save(); render(); dlgMove.close();
+  backfillFx(); // el ≈ en moneda base aparece en cuanto llega el tipo del día
 }
 async function renameMove(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
@@ -1217,13 +1270,13 @@ async function editMoveAmount(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
   const v=await askEdit("Importe", e.principal, {number:true}); if(v===null) return;
   const n=parseFloat(v); if(!n||n<=0) return;
-  e.principal=n; await save(); render();
+  e.principal=n; await save(); render(); backfillFx();
 }
 async function editMoveDate(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
   const v=await askEdit("Fecha", e.date||today(), {date:true});
   if(v===null || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
-  e.date=v; await save(); render();
+  e.date=v; await save(); render(); backfillFx();
 }
 // suma de movimientos por moneda en un mes dado (ym = "2026-07")
 function movesByCur(moves, ym, type){
@@ -1243,14 +1296,26 @@ function renderMes(){
   Object.keys(out).forEach(c=>net[c]=(net[c]||0)-out[c]);
   const now=new Date();
   const monthName=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][now.getMonth()];
+  // totales aproximados del mes en la moneda base (usando el snapshot de cada día)
+  const b=baseCur();
+  const mm=moves.filter(e=>(e.date||"").slice(0,7)===ym);
+  const conv=t=>{ let s=0, foreign=0, miss=0; mm.filter(e=>e.type===t).forEach(e=>{
+    if(e.currency===b) s+=principal(e);
+    else { foreign++; if(e.fx&&e.fx.to===b) s+=e.fx.amount; else miss++; }
+  }); return {s,foreign,miss}; };
+  const co=conv("expense"), ci=conv("income");
+  const showApx=(co.foreign+ci.foreign)>0;
+  const apx=(v,pend)=>`<div class="stat-approx mono">≈ ${(v<0?"−":"")+moneyApprox(Math.abs(v),b)}${pend?" *":""}</div>`;
+  const anyForeign=moves.some(e=>e.currency!==b);
   totEl.innerHTML = `
     <div class="group-lbl">${monthName} ${now.getFullYear()}</div>
     <div class="totals tri">
-      <div class="stat returned"><div class="lbl">Gastado</div><div class="val">${currencyHTML(out)}</div></div>
-      <div class="stat collected"><div class="lbl">Ingresado</div><div class="val">${currencyHTML(inn)}</div></div>
-      <div class="stat"><div class="lbl">Neto del mes</div><div class="val">${netHTML(net)}</div></div>
+      <div class="stat returned"><div class="lbl">Gastado</div><div class="val">${currencyHTML(out)}</div>${showApx?apx(co.s,co.miss>0):''}</div>
+      <div class="stat collected"><div class="lbl">Ingresado</div><div class="val">${currencyHTML(inn)}</div>${showApx?apx(ci.s,ci.miss>0):''}</div>
+      <div class="stat"><div class="lbl">Neto del mes</div><div class="val">${netHTML(net)}</div>${showApx?apx(ci.s-co.s,(co.miss+ci.miss)>0):''}</div>
     </div>
-    ${moves.length ? `<div class="hero"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${dominantCurrency(moves)})</div><svg id="mesChart" class="chart"></svg></div>` : ``}`;
+    <button class="cur-edit" onclick="changeBaseCur()" title="La moneda en la que se calculan los ≈ aproximados">Moneda base: ${b} ✎</button>
+    ${moves.length ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>` : ``}`;
   // lista de movimientos agrupada por mes (más reciente primero)
   if(!moves.length){
     listEl.innerHTML = `<div class="onboard"><div class="onboard-emoji">💰</div>
@@ -1275,25 +1340,33 @@ function renderMes(){
         <div class="mv-concept"><button class="edit-btn" onclick="renameMove('${e.id}')" title="Editar concepto">${esc(e.party)}<span class="ed">✎</span></button></div>
         <div class="mv-date"><button class="edit-btn" onclick="editMoveDate('${e.id}')" title="Editar fecha">${niceDate(e.date)}<span class="ed">✎</span></button></div>
       </div>
-      <button class="edit-btn mono mv-amt" onclick="editMoveAmount('${e.id}')" title="Editar importe">${sign}${money(principal(e),e.currency)}</button>
+      <span class="mv-right">
+        <button class="edit-btn mono mv-amt" onclick="editMoveAmount('${e.id}')" title="Editar importe">${sign}${money(principal(e),e.currency)}</button>
+        ${e.currency!==b ? `<span class="mv-approx mono" title="al cambio del ${(e.fx&&e.fx.day)||'…'}">${(e.fx&&e.fx.to===b) ? "≈ "+moneyApprox(e.fx.amount,b) : "≈ …"}</span>` : ``}
+      </span>
       <button class="pay-del" onclick="delEntry('${e.id}')">×</button>
     </div>`;
   });
   listEl.innerHTML=html;
   drawMesChart(moves);
 }
-// gráfico de flujo mensual: dos barras por mes (gasto en rojo, ingreso en verde)
+// gráfico de flujo mensual: dos barras por mes (gasto en rojo, ingreso en verde),
+// todo convertido a la moneda base con el snapshot de cada movimiento
 function drawMesChart(moves){
   const svg=document.getElementById("mesChart"); if(!svg) return;
-  const cur=dominantCurrency(moves);
+  const base=baseCur();
   const now=new Date(), buckets=[];
   for(let k=5;k>=0;k--){
     const d=new Date(now.getFullYear(), now.getMonth()-k, 1);
     buckets.push({ ym:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label:MONTHS[d.getMonth()], out:0, inn:0 });
   }
-  moves.filter(e=>e.currency===cur).forEach(e=>{
+  moves.forEach(e=>{
     const b=buckets.find(x=>x.ym===(e.date||"").slice(0,7)); if(!b) return;
-    if(e.type==="expense") b.out+=principal(e); else b.inn+=principal(e);
+    let v=null;
+    if(e.currency===base) v=principal(e);
+    else if(e.fx && e.fx.to===base) v=e.fx.amount; // sin snapshot aún (offline): fuera hasta tenerlo
+    if(v==null) return;
+    if(e.type==="expense") b.out+=v; else b.inn+=v;
   });
   const W=Math.max(220, Math.round(svg.getBoundingClientRect().width || 300)), H=92;
   const max=Math.max(1, ...buckets.map(b=>Math.max(b.out,b.inn)));
@@ -1650,7 +1723,7 @@ function disconnectSync(){
   syncKey=null; document.getElementById("sync_disconnect").style.display="none";
   setSyncStatus("Desconectado de este dispositivo."); updateSyncBadge();
 }
-window.addEventListener("online", ()=>{ if(syncConfigured()) cloudSync(true); });
+window.addEventListener("online", ()=>{ if(syncConfigured()) cloudSync(true); backfillFx(); });
 // empuja YA los cambios pendientes (sin esperar al debounce) — p.ej. antes de cerrar la app
 function flushSync(){ if(!syncConfigured()) return; if(syncTimer){ clearTimeout(syncTimer); syncTimer=null; } cloudSync(true); }
 // al pasar a segundo plano: sube lo pendiente antes de que el sistema suspenda la app.
@@ -1678,7 +1751,7 @@ function toggleTheme(){
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v31";
+const APP_VERSION = "v32";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
