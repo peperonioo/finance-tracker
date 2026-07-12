@@ -390,6 +390,49 @@
     @keyframes sheetIn{from{opacity:.5;transform:translateY(48px)}to{opacity:1;transform:none}}
     dialog[open]{animation:sheetIn .32s cubic-bezier(.2,.8,.3,1) both}
   }
+
+  /* ═══════════ branding + ahorro (v36) ═══════════ */
+  ::selection{background:var(--lime);color:#111}
+  html{-webkit-tap-highlight-color:transparent}
+  h1,dialog h2,.onboard-title,.btn{font-family:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,sans-serif}
+  h1{font-size:32px}
+  /* icono-emoji tocable en filas */
+  button.mv-ico{border:0;cursor:pointer;padding:0;font-size:16px;line-height:1}
+  /* navegación de meses ‹ › */
+  .mes-nav{align-items:center}
+  .mes-nav .mes-title{letter-spacing:.16em}
+  .mes-arrow{background:var(--bg2);border:1px solid var(--line);color:var(--ink);width:26px;height:26px;border-radius:9px;cursor:pointer;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;font-family:inherit;flex:none}
+  .mes-arrow:hover{border-color:var(--acc);color:var(--acc)}
+  .mes-arrow:disabled{opacity:.3;cursor:default;border-color:var(--line);color:var(--dim)}
+  /* presupuesto mensual */
+  .budget{background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:13px 14px;margin:2px 0 10px;box-shadow:var(--shadow-card)}
+  .budget-top{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;color:var(--dim);margin-bottom:9px}
+  .budget-top .edit-btn{font-weight:700;color:var(--ink)}
+  .budget-bar{position:relative;height:10px;background:var(--track);border-radius:6px;overflow:visible}
+  .budget-bar .fill{height:100%;border-radius:6px;transition:width .4s ease}
+  .budget.ok .fill{background:var(--lime);box-shadow:0 0 10px rgba(204,255,0,.35)}
+  :root[data-theme="light"] .budget.ok .fill{box-shadow:none}
+  .budget.warn .fill{background:var(--warn)}
+  .budget.over .fill{background:var(--red)}
+  .budget-bar .proj-mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--dim);border-radius:1px;opacity:.8}
+  .budget-info{font-size:11.5px;color:var(--dim);margin-top:8px}
+  .budget.over .budget-info{color:var(--red)}
+  /* metas de ahorro */
+  .goal{display:flex;align-items:center;gap:11px;background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:12px 13px;margin-bottom:8px;box-shadow:var(--shadow-card)}
+  .goal .mv-ico{width:34px;height:34px;font-size:18px;background:rgba(204,255,0,.10)}
+  :root[data-theme="light"] .goal .mv-ico{background:rgba(92,118,0,.08)}
+  .goal-main{flex:1;min-width:0}
+  .goal-top{display:flex;justify-content:space-between;align-items:baseline;font-size:14.5px;font-weight:700;margin-bottom:7px}
+  .goal-pct{font-size:11.5px;color:var(--acc);font-weight:700}
+  .goal-bar{height:8px;background:var(--track);border-radius:5px;overflow:hidden}
+  .goal-bar > div{height:100%;background:var(--lime);border-radius:5px;box-shadow:0 0 10px rgba(204,255,0,.35);transition:width .4s ease}
+  :root[data-theme="light"] .goal-bar > div{background:var(--acc);box-shadow:none}
+  .goal-nums{font-size:11.5px;color:var(--dim);margin-top:7px}
+  .goal-de{letter-spacing:.02em}
+  .goal-side{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+  .goal-side .quick{padding:2px 0;font-size:11.5px}
+  .goal.gdone{border-color:var(--acc)}
+  .goal.gdone .goal-pct{color:var(--green)}
 </style>
 </head>
 <body>
@@ -507,6 +550,20 @@
   <div class="dlg-actions">
     <button class="btn cancel" onclick="dlgFixed.close()">Cancelar</button>
     <button class="btn" onclick="saveFixed()">Guardar</button>
+  </div>
+</dialog>
+
+<dialog id="dlgGoal">
+  <h2>🎯 Nueva meta de ahorro</h2>
+  <p class="hint">Ponle nombre y objetivo. Cada vez que apartes dinero, añádelo con «+ aportar» y mira la barra llenarse.</p>
+  <input id="g_name" placeholder="¿Para qué ahorras? (moto, viaje, colchón…)" autocomplete="off">
+  <div class="two">
+    <input id="g_target" type="number" inputmode="decimal" placeholder="Objetivo">
+    <select id="g_cur" class="cur-select"></select>
+  </div>
+  <div class="dlg-actions">
+    <button class="btn cancel" onclick="dlgGoal.close()">Cancelar</button>
+    <button class="btn" onclick="saveGoal()">Crear meta</button>
   </div>
 </dialog>
 
@@ -691,6 +748,30 @@ function daysSince(iso){
   const ms=Date.parse(today())-Date.parse(iso||today());
   return isNaN(ms)?0:Math.max(0, Math.floor(ms/86400000));
 }
+/* ——— emoji automático por concepto (editable tocándolo) ——— */
+const EMOJI_RULES=[
+  [/alquiler|renta|casa|piso|hogar/i,"🏠"],[/moto|scooter/i,"🏍️"],[/coche|auto\b|carro/i,"🚗"],
+  [/comida|resto|restaur|cena|almuerzo|food/i,"🍜"],[/super|mercado|grocer/i,"🛒"],[/gym|gimnasio/i,"💪"],
+  [/sueldo|salario|n[oó]mina/i,"💰"],[/luz|agua|gas\b|electric/i,"💡"],[/internet|wifi|fibra/i,"📶"],
+  [/tel[eé]fono|m[oó]vil|celular/i,"📱"],[/gasolina|uber|taxi|transporte|bus\b|tren/i,"🛵"],
+  [/viaje|vuelo|hotel/i,"✈️"],[/ropa|zapat/i,"👕"],[/salud|m[eé]dico|farmacia|dentista/i,"💊"],
+  [/cine|juego|ocio|fiesta/i,"🎮"],[/caf[eé]/i,"☕"],[/netflix|spotify|suscri|prime|disney/i,"📺"],
+  [/venta\b/i,"💵"],[/ahorro|meta/i,"🎯"]
+];
+function autoEmoji(name, kind){
+  const n=(name||"");
+  for(const [re,em] of EMOJI_RULES){ if(re.test(n)) return em; }
+  return kind==="income" ? "💵" : (kind==="goal" ? "🎯" : "💸");
+}
+async function editEmoji(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("Emoji (déjalo vacío para el automático)", e.emoji||"");
+  if(v===null) return;
+  const kind=(e.type==="income"||e.kind==="income")?"income":"expense";
+  e.emoji=(v.trim()||autoEmoji(e.party,kind)).slice(0,4);
+  await save(); render();
+}
+
 /* ——— tipo de cambio: snapshot ≈ en tu moneda base, congelado al día del gasto ——— */
 const baseCur = () => Store.get("base_cur") || "USD";
 const moneyApprox = (n,c) => sym(c) + (Math.abs(n)>=1000 ? fmt(n) : (+n.toFixed(2)).toLocaleString("en-AU"));
@@ -793,6 +874,12 @@ function normalize(data){
       if(e.type==="fixed"){
         if(e.kind!=="income") e.kind="expense";
         e.day=Math.min(Math.max(parseInt(e.day,10)||1,1),31);
+      }
+      // metas de ahorro: objetivo numérico
+      if(e.type==="goal"){ e.principal=+e.principal||0; }
+      // emoji por defecto según el concepto (movimientos, fijos y metas)
+      if((isMove(e)||e.type==="fixed"||e.type==="goal") && !e.emoji){
+        e.emoji = e.type==="goal" ? autoEmoji(e.party,"goal") : autoEmoji(e.party,(e.type==="income"||e.kind==="income")?"income":"expense");
       }
       // cada pago debe tener id estable (para fusionar sin perder ni duplicar)
       e.payments.forEach((p,idx)=>{ if(p && !p.id) p.id = legacyPayId(e.id, p, idx); });
@@ -1181,7 +1268,7 @@ async function delEntry(id){
   const removed=entries[idx];
   entries.splice(idx,1);
   await save(); render();
-  const tipo = removed.type==="sale" ? "Venta" : removed.type==="debt" ? "Deuda" : removed.type==="fixed" ? "Fijo" : removed.type==="expense" ? "Gasto" : "Ingreso";
+  const tipo = removed.type==="sale" ? "Venta" : removed.type==="debt" ? "Deuda" : removed.type==="fixed" ? "Fijo" : removed.type==="goal" ? "Meta" : removed.type==="expense" ? "Gasto" : "Ingreso";
   showUndo(tipo+" «"+removed.party+"» borrado", async ()=>{
     entries.splice(Math.min(idx, entries.length), 0, removed);
     await save(); render();
@@ -1346,7 +1433,7 @@ async function saveMove(){
   let d=document.getElementById("m_date").value;
   if(!/^\d{4}-\d{2}-\d{2}$/.test(d||"")) d=today();
   Store.set("last_cur", cur);
-  entries.unshift({id:"m-"+Date.now(),type:moveType,party:concept,date:d,currency:cur,principal:amt,payments:[],deletedPays:[]});
+  entries.unshift({id:"m-"+Date.now(),type:moveType,party:concept,date:d,currency:cur,principal:amt,emoji:autoEmoji(concept,moveType),payments:[],deletedPays:[]});
   await save(); render(); dlgMove.close();
   backfillFx(); // el ≈ en moneda base aparece en cuanto llega el tipo del día
 }
@@ -1387,7 +1474,7 @@ async function saveFixed(){
   const cur=document.getElementById("f_cur").value||"AUD";
   const kind=document.getElementById("f_kind").value==="income"?"income":"expense";
   Store.set("last_cur",cur);
-  entries.push({id:"f-"+Date.now(), type:"fixed", kind, party:p, principal:amt, currency:cur, day, date:today(), payments:[], deletedPays:[]});
+  entries.push({id:"f-"+Date.now(), type:"fixed", kind, party:p, principal:amt, currency:cur, day, date:today(), emoji:autoEmoji(p,kind), payments:[], deletedPays:[]});
   await save(); render(); dlgFixed.close();
 }
 // marca el fijo del mes como pagado: crea el movimiento real (fecha de hoy,
@@ -1395,7 +1482,7 @@ async function saveFixed(){
 async function payFixed(id){
   const t=entries.find(x=>x.id===id); if(!t) return;
   const kind=t.kind==="income"?"income":"expense";
-  entries.unshift({id:"m-"+Date.now(), type:kind, party:t.party, date:today(), currency:t.currency, principal:principal(t), payments:[], deletedPays:[], fixed:t.id});
+  entries.unshift({id:"m-"+Date.now(), type:kind, party:t.party, date:today(), currency:t.currency, principal:principal(t), emoji:t.emoji||autoEmoji(t.party,kind), payments:[], deletedPays:[], fixed:t.id});
   await save(); render(); backfillFx();
 }
 async function editFixedDay(id){
@@ -1411,6 +1498,62 @@ function fixedPaidMove(t, ym){
   return entries.find(m=>isMove(m) && (m.date||"").slice(0,7)===ym &&
     (m.fixed===t.id || ((m.party||"").trim().toLowerCase()===(t.party||"").trim().toLowerCase() && m.currency===t.currency && m.type===kind)));
 }
+
+/* ——— presupuesto mensual de gasto (en moneda base; sincroniza como entrada) ——— */
+function getBudget(){ const e=entries.find(x=>x.id==="cfg-budget"); return e ? (+e.principal||0) : 0; }
+async function setBudget(){
+  const cur=getBudget();
+  const v=await askEdit("Presupuesto mensual de gasto en "+baseCur()+" (0 = quitar)", cur||"", {number:true});
+  if(v===null) return;
+  const n=Math.max(0, parseFloat(v)||0);
+  let e=entries.find(x=>x.id==="cfg-budget");
+  if(n<=0){ if(e) entries=entries.filter(x=>x.id!=="cfg-budget"); }
+  else if(e){ e.principal=n; e.currency=baseCur(); }
+  else entries.push({id:"cfg-budget", type:"budget", party:"Presupuesto", principal:n, currency:baseCur(), date:today(), payments:[], deletedPays:[]});
+  await save(); render();
+}
+
+/* ——— metas de ahorro (los aportes reusan payments: fusión por id + tombstones) ——— */
+function openGoal(){
+  document.getElementById("g_name").value="";
+  document.getElementById("g_target").value="";
+  document.getElementById("g_cur").value=baseCur();
+  dlgGoal.showModal();
+}
+async function saveGoal(){
+  const p=document.getElementById("g_name").value.trim();
+  const amt=parseFloat(document.getElementById("g_target").value);
+  if(!p){ document.getElementById("g_name").focus(); return; }
+  if(!amt||amt<=0){ document.getElementById("g_target").focus(); return; }
+  const cur=document.getElementById("g_cur").value||baseCur();
+  entries.push({id:"g-"+Date.now(), type:"goal", party:p, principal:amt, currency:cur, date:today(), emoji:autoEmoji(p,"goal"), payments:[], deletedPays:[]});
+  await save(); render(); dlgGoal.close();
+}
+async function aportarGoal(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("¿Cuánto apartas para «"+e.party+"»? ("+e.currency+")", "", {number:true});
+  if(v===null) return;
+  const n=parseFloat(v); if(!n||n<=0) return;
+  const wasDone=paid(e)>=principal(e);
+  const pay={id:newPayId(), amount:n, date:today()};
+  e.payments.push(pay);
+  await save(); render();
+  if(!wasDone && paid(e)>=principal(e)) confetti(); // 🎉 meta conseguida
+  showUndo("Aporte de "+money(n,e.currency)+" a «"+e.party+"»", async ()=>{
+    const g=entries.find(x=>x.id===id); if(!g) return;
+    const i=g.payments.findIndex(x=>x.id===pay.id); if(i<0) return;
+    g.deletedPays=Array.isArray(g.deletedPays)?g.deletedPays:[];
+    g.deletedPays.push(pay.id); g.payments.splice(i,1);
+    await save(); render();
+  });
+}
+async function editGoalTarget(id){
+  const e=entries.find(x=>x.id===id); if(!e) return;
+  const v=await askEdit("Objetivo de «"+e.party+"» ("+e.currency+")", e.principal, {number:true});
+  if(v===null) return;
+  const n=parseFloat(v); if(!n||n<=0) return;
+  e.principal=n; await save(); render();
+}
 // suma de movimientos por moneda en un mes dado (ym = "2026-07")
 function movesByCur(moves, ym, type){
   const m={};
@@ -1418,17 +1561,22 @@ function movesByCur(moves, ym, type){
        .forEach(e=>{ m[e.currency]=(m[e.currency]||0)+principal(e); });
   return m;
 }
+// navegación de meses: 0 = mes actual, -1 = anterior…
+let mesOffset=0;
+function shiftMes(d){ mesOffset=Math.min(0, mesOffset+d); renderMes(); }
 function renderMes(){
   const totEl=document.getElementById("mesTotals"), listEl=document.getElementById("mesList");
   if(!totEl||!listEl) return;
   const moves=entries.filter(isMove);
-  const ym=today().slice(0,7);
+  const now=new Date();
+  const viewDate=new Date(now.getFullYear(), now.getMonth()+mesOffset, 1);
+  const ym=`${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,"0")}`;
+  const isCurrent = mesOffset===0;
   const out=movesByCur(moves, ym, "expense"), inn=movesByCur(moves, ym, "income");
   const net={};
   Object.keys(inn).forEach(c=>net[c]=(net[c]||0)+inn[c]);
   Object.keys(out).forEach(c=>net[c]=(net[c]||0)-out[c]);
-  const now=new Date();
-  const monthName=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][now.getMonth()];
+  const monthName=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][viewDate.getMonth()];
   // totales aproximados del mes en la moneda base (usando el snapshot de cada día)
   const b=baseCur();
   const mm=moves.filter(e=>(e.date||"").slice(0,7)===ym);
@@ -1465,33 +1613,75 @@ function renderMes(){
   const projOut=co.s + pendFixedOut + (varOut/Math.max(1,todayD))*(daysInMonth-todayD);
   const projNet=(ci.s+pendFixedIn)-projOut;
   const hasMonthData=mm.length>0 || fixeds.length>0;
-  const projHTML = hasMonthData ? `
+  const projHTML = (isCurrent && hasMonthData) ? `
     <div class="proj">📈 Día ${todayD}/${daysInMonth} · a este ritmo cerrarás el mes:
       gasto <span class="mono proj-out">≈ ${moneyApprox(projOut,b)}</span> ·
       neto <span class="mono ${projNet>=0?'proj-pos':'proj-neg'}">≈ ${(projNet<0?"−":"")+moneyApprox(Math.abs(projNet),b)}</span>${projMiss?" *":""}</div>` : "";
+  // ——— presupuesto mensual: barra con estado y marcador de proyección ———
+  const bud=getBudget();
+  let budHTML="";
+  if(bud>0){
+    const pct=Math.min(100, co.s/bud*100);
+    const cls=co.s>=bud?"over":(co.s>=bud*0.75?"warn":"ok");
+    const left=bud-co.s;
+    const projPct=(isCurrent && projOut>co.s) ? Math.min(100, projOut/bud*100) : null;
+    budHTML=`<div class="budget ${cls}">
+      <div class="budget-top"><span>🎯 Presupuesto de ${monthName.toLowerCase()}</span><button class="edit-btn mono" onclick="setBudget()" title="Cambiar presupuesto">${moneyApprox(bud,b)}<span class="ed">✎</span></button></div>
+      <div class="budget-bar"><div class="fill" style="width:${pct.toFixed(1)}%"></div>${projPct!=null?`<span class="proj-mark" style="left:${projPct.toFixed(1)}%" title="proyección"></span>`:""}</div>
+      <div class="budget-info mono">${moneyApprox(co.s,b)} gastado · ${left>=0?`quedan ${moneyApprox(left,b)}`:`⚠ excedido en ${moneyApprox(-left,b)}`}</div>
+    </div>`;
+  } else if(isCurrent){
+    budHTML=`<button class="quick" onclick="setBudget()">🎯 Ponte un presupuesto mensual de gasto</button>`;
+  }
   totEl.innerHTML = `
-    <div class="group-lbl">${monthName} ${now.getFullYear()}</div>
+    <div class="group-lbl mes-nav">
+      <button class="mes-arrow" onclick="shiftMes(-1)" title="Mes anterior">‹</button>
+      <span class="mes-title">${monthName} ${viewDate.getFullYear()}</span>
+      <button class="mes-arrow" onclick="shiftMes(1)" ${isCurrent?'disabled':''} title="Mes siguiente">›</button>
+    </div>
     <div class="totals tri">
       <div class="stat returned"><div class="lbl">Gastado</div><div class="val">${currencyHTML(out)}</div>${showApx?apx(co.s,co.miss>0):''}</div>
       <div class="stat collected"><div class="lbl">Ingresado</div><div class="val">${currencyHTML(inn)}</div>${showApx?apx(ci.s,ci.miss>0):''}</div>
       <div class="stat"><div class="lbl">Neto del mes</div><div class="val">${netHTML(net)}</div>${showApx?apx(ci.s-co.s,(co.miss+ci.miss)>0):''}</div>
     </div>
     ${projHTML}
+    ${budHTML}
     <button class="cur-edit" onclick="changeBaseCur()" title="La moneda en la que se calculan los ≈ aproximados">Moneda base: ${b} ✎</button>
-    ${moves.length ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>
+    ${(moves.length && isCurrent) ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>
     <div class="hero" style="margin-top:10px"><div class="chart-lbl">Neto acumulado (${anyForeign?'≈ ':''}${b})</div><svg id="netChart" class="chart"></svg></div>` : ``}`;
-  // fijos mensuales: pendientes/pagados de este mes
+  // punto rojo de la pestaña: SIEMPRE contra el mes real de hoy (no el navegado)
+  const ymNow=today().slice(0,7);
   let overdueCount=0;
+  fixeds.forEach(t=>{ if(!fixedPaidMove(t,ymNow) && todayD>(t.day||1)) overdueCount++; });
+  updateMesTabDot(overdueCount);
+  // metas de ahorro (solo en la vista del mes actual)
+  const goals=entries.filter(e=>e.type==="goal");
+  const goalsHTML = goals.length ? goals.map(g=>{
+    const saved=paid(g), target=principal(g)||1, pct=Math.min(100,saved/target*100), done=saved>=target;
+    return `<div class="goal ${done?'gdone':''}">
+      <button class="mv-ico goal-ico" onclick="editEmoji('${g.id}')" title="Cambiar emoji">${g.emoji||"🎯"}</button>
+      <div class="goal-main">
+        <div class="goal-top"><button class="edit-btn" onclick="renameMove('${g.id}')" title="Renombrar meta">${esc(g.party)}<span class="ed">✎</span></button><span class="goal-pct mono">${done?"✓ ¡conseguido!":Math.round(pct)+"%"}</span></div>
+        <div class="goal-bar"><div style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="goal-nums mono">${money(saved,g.currency)} <span class="goal-de">de</span> <button class="edit-btn mono" onclick="editGoalTarget('${g.id}')" title="Editar objetivo">${money(target,g.currency)}<span class="ed">✎</span></button></div>
+      </div>
+      <span class="goal-side">${done?"":`<button class="quick" onclick="aportarGoal('${g.id}')">+ aportar</button>`}<button class="pay-del" onclick="delEntry('${g.id}')">×</button></span>
+    </div>`;
+  }).join("") : `<div class="empty">Ahorra con intención: la moto 🏍️, un viaje ✈️… crea tu primera meta.</div>`;
+  const goalsSection = isCurrent ? `
+    <div class="group-lbl">🎯 Metas de ahorro</div>
+    ${goalsHTML}
+    <button class="quick" onclick="openGoal()">+ nueva meta</button>` : "";
+  // fijos mensuales (solo en la vista del mes actual)
   const fixedHTML=fixeds.map(t=>{
     const kind=t.kind==="income"?"income":"expense";
-    const pm=fixedPaidMove(t, ym);
+    const pm=fixedPaidMove(t, ymNow);
     const day=t.day||1;
     const overdue=!pm && todayD>day;
-    if(overdue) overdueCount++;
     const status = pm ? `✓ ${kind==="income"?"Recibido":"Pagado"} el ${niceDate(pm.date)}`
       : (overdue ? `venció el ${day} · pendiente` : `vence el día ${day}`);
     return `<div class="mv fixedrow ${kind} ${pm?'fdone':''}">
-      <span class="mv-ico">↻</span>
+      <button class="mv-ico" onclick="editEmoji('${t.id}')" title="Cambiar emoji">${t.emoji||"↻"}</button>
       <div class="mv-main">
         <div class="mv-concept"><button class="edit-btn" onclick="renameMove('${t.id}')" title="Editar nombre">${esc(t.party)}<span class="ed">✎</span></button></div>
         <div class="mv-date${overdue?' f-overdue':''}"><button class="edit-btn" onclick="editFixedDay('${t.id}')" title="Editar día del mes">${status}<span class="ed">✎</span></button></div>
@@ -1503,32 +1693,27 @@ function renderMes(){
       <button class="pay-del" onclick="delEntry('${t.id}')">×</button>
     </div>`;
   }).join("");
-  updateMesTabDot(overdueCount);
-  // lista de movimientos agrupada por mes (más reciente primero)
-  if(!moves.length && !fixeds.length){
-    listEl.innerHTML = `<div class="onboard"><div class="onboard-emoji">💰</div>
-      <div class="onboard-title">Tu economía del mes</div>
-      <div class="onboard-sub">Registra gastos (alquiler, comida…) e ingresos, y mira tu mes de un vistazo.</div>
-      <button class="btn onboard-btn" onclick="openMove('expense')">− Añadir gasto</button>
-      <button class="quick" onclick="openFixed()" style="text-align:center;width:100%">↻ o crea un fijo mensual (alquiler…)</button></div>`;
-    return;
-  }
-  const fixedSection = `
+  const fixedSection = isCurrent ? `
     <div class="group-lbl">Fijos mensuales</div>
     ${fixedHTML || `<div class="empty">Sin fijos aún. Añade el alquiler y márcalo pagado cada mes con un toque.</div>`}
-    <button class="quick" onclick="openFixed()">+ añadir fijo mensual</button>`;
-  const sorted=[...moves].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.id>a.id?1:-1));
-  let html="", lastYm="";
-  sorted.forEach(e=>{
-    const eym=(e.date||"").slice(0,7);
-    if(eym!==lastYm){
-      lastYm=eym;
-      const [y,mo]=eym.split("-");
-      html+=`<div class="group-lbl">${MONTHS[+mo-1]} '${y.slice(2)}</div>`;
-    }
+    <button class="quick" onclick="openFixed()">+ añadir fijo mensual</button>` : "";
+  // onboarding solo si no hay nada de nada
+  if(!moves.length && !fixeds.length && !goals.length && isCurrent){
+    listEl.innerHTML = `<div class="onboard"><div class="onboard-emoji">💰</div>
+      <div class="onboard-title">Tu economía del mes</div>
+      <div class="onboard-sub">Registra gastos (alquiler, comida…) e ingresos, ponte metas de ahorro y mira tu mes de un vistazo.</div>
+      <button class="btn onboard-btn" onclick="openMove('expense')">− Añadir gasto</button>
+      <button class="quick" onclick="openGoal()" style="text-align:center;width:100%">🎯 o crea una meta de ahorro</button></div>`;
+    return;
+  }
+  // movimientos SOLO del mes que estás viendo (navega con ‹ ›)
+  const monthMoves=[...mm].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.id>a.id?1:-1));
+  let html=`<div class="group-lbl">Movimientos de ${monthName.toLowerCase()}</div>`;
+  if(!monthMoves.length) html+=`<div class="empty">Sin movimientos en ${monthName.toLowerCase()}. Usa ‹ para ver meses anteriores.</div>`;
+  monthMoves.forEach(e=>{
     const sign=e.type==="expense"?"−":"+";
     html+=`<div class="mv ${e.type}">
-      <span class="mv-ico">${e.type==="expense"?"↓":"↑"}</span>
+      <button class="mv-ico" onclick="editEmoji('${e.id}')" title="Cambiar emoji">${e.emoji||(e.type==="expense"?"↓":"↑")}</button>
       <div class="mv-main">
         <div class="mv-concept"><button class="edit-btn" onclick="renameMove('${e.id}')" title="Editar concepto">${esc(e.party)}<span class="ed">✎</span></button></div>
         <div class="mv-date"><button class="edit-btn" onclick="editMoveDate('${e.id}')" title="Editar fecha">${niceDate(e.date)}<span class="ed">✎</span></button></div>
@@ -1540,9 +1725,8 @@ function renderMes(){
       <button class="pay-del" onclick="delEntry('${e.id}')">×</button>
     </div>`;
   });
-  listEl.innerHTML=fixedSection+html;
-  drawMesChart(moves);
-  drawNetChart(moves);
+  listEl.innerHTML=goalsSection+fixedSection+html;
+  if(isCurrent){ drawMesChart(moves); drawNetChart(moves); }
 }
 // punto rojo en la pestaña Mi mes cuando hay fijos vencidos sin pagar
 function updateMesTabDot(n){
@@ -2003,7 +2187,7 @@ async function toggleTheme(){ // el botón abre el selector de temas
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v35";
+const APP_VERSION = "v36";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
