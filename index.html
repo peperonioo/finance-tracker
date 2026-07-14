@@ -433,6 +433,24 @@
   .goal-side .quick{padding:2px 0;font-size:11.5px}
   .goal.gdone{border-color:var(--acc)}
   .goal.gdone .goal-pct{color:var(--green)}
+
+  /* ═══════════ v37: base-first · avatares · táctil 44px · iconografía ═══════════ */
+  /* totales del mes: cifra grande en moneda base, divisas nativas debajo */
+  .stat-native{font-size:10.5px;color:var(--dim);margin-top:5px;line-height:1.45}
+  .stat .val.pos{color:var(--green)}
+  .stat .val.neg{color:var(--red)}
+  /* avatar por persona en Cuentas: inicial + color estable (hash del nombre) */
+  .avatar{width:34px;height:34px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;flex:none;font-family:ui-rounded,"SF Pro Rounded",-apple-system,sans-serif;background:hsl(var(--av) 55% 60% / .16);color:hsl(var(--av) 60% 64%)}
+  :root[data-theme="light"] .avatar{background:hsl(var(--av) 55% 40% / .12);color:hsl(var(--av) 65% 32%)}
+  /* área táctil ≥44px sin cambiar el visual (padding invisible) */
+  .pay-del,.mes-arrow,button.mv-ico,.snack-undo,.goal-ico{position:relative}
+  .pay-del::after{content:"";position:absolute;inset:-12px}
+  .mes-arrow::after{content:"";position:absolute;inset:-9px}
+  button.mv-ico::after{content:"";position:absolute;inset:-7px}
+  .snack-undo::after{content:"";position:absolute;inset:-10px}
+  /* iconografía consistente: mismos tamaños de glifo en todas las filas */
+  .pay-del{font-size:15px;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+  .edit-btn .ed{font-size:10.5px;opacity:.75}
 </style>
 </head>
 <body>
@@ -471,6 +489,9 @@
 
 <div id="tab-mes" style="display:none">
   <div id="mesTotals"></div>
+  <div id="mesToolbar" class="toolbar" style="display:none">
+    <input id="mq" class="search" placeholder="Buscar movimiento (en todos los meses)…" autocomplete="off" oninput="onMesSearch(this.value)">
+  </div>
   <div id="mesList"></div>
   <div class="addbtns">
     <button class="btn ghost" onclick="openMove('expense')">− Gasto</button>
@@ -762,6 +783,12 @@ function autoEmoji(name, kind){
   const n=(name||"");
   for(const [re,em] of EMOJI_RULES){ if(re.test(n)) return em; }
   return kind==="income" ? "💵" : (kind==="goal" ? "🎯" : "💸");
+}
+// tono estable por persona (hash del nombre → 0-359) para el avatar de Cuentas
+function avatarHue(name){
+  let h=0; const s=(name||"?");
+  for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0;
+  return Math.abs(h)%360;
 }
 async function editEmoji(id){
   const e=entries.find(x=>x.id===id); if(!e) return;
@@ -1200,7 +1227,7 @@ function card(e,i){
   return `
   <div class="card ${flow} ${e._open?'expanded':''} ${cleared?'done':''}" data-id="${e.id}"${inAnim(i)}>
     <div class="head" onclick="toggle('${e.id}')">
-      <span class="chev">▶</span>
+      <span class="avatar" style="--av:${avatarHue(e.party)}">${esc((e.party||"?").trim().charAt(0).toUpperCase())}</span>
       <div class="who"><button class="edit-btn who-edit" onclick="event.stopPropagation();renameEntry('${e.id}')" title="Renombrar">${esc(e.party)}<span class="ed">✎</span></button><span class="date">${itemHint}${niceDate(e.date)}${ageBadge}</span></div>
       <span class="pill ${cleared?'done':'open'}">${pillTxt}</span>
     </div>
@@ -1564,6 +1591,9 @@ function movesByCur(moves, ym, type){
 // navegación de meses: 0 = mes actual, -1 = anterior…
 let mesOffset=0;
 function shiftMes(d){ mesOffset=Math.min(0, mesOffset+d); renderMes(); }
+// buscador de movimientos (busca en TODOS los meses)
+let mesQuery="";
+function onMesSearch(v){ mesQuery=v; renderMes(); }
 function renderMes(){
   const totEl=document.getElementById("mesTotals"), listEl=document.getElementById("mesList");
   if(!totEl||!listEl) return;
@@ -1585,9 +1615,18 @@ function renderMes(){
     else { foreign++; if(e.fx&&e.fx.to===b) s+=e.fx.amount; else miss++; }
   }); return {s,foreign,miss}; };
   const co=conv("expense"), ci=conv("income");
-  const showApx=(co.foreign+ci.foreign)>0;
-  const apx=(v,pend)=>`<div class="stat-approx mono">≈ ${(v<0?"−":"")+moneyApprox(Math.abs(v),b)}${pend?" *":""}</div>`;
   const anyForeign=moves.some(e=>e.currency!==b);
+  // tarjetas "base-first": la cifra grande es el ≈ en moneda base; las divisas
+  // nativas pasan a línea secundaria (sin desbordes con 2-3 monedas)
+  const nativeTxt=m=>Object.keys(m).filter(c=>Math.round(m[c])!==0)
+    .map(c=>(m[c]<0?"−":"")+money(Math.abs(m[c]),c)).join(" · ");
+  const statCard=(cls,lbl,m,s,miss)=>{
+    const has=Object.keys(m).some(c=>Math.round(m[c])!==0);
+    const mixed=has&&Object.keys(m).some(c=>c!==b);
+    const val=has?`${mixed?"≈ ":""}${s<0?"−":""}${moneyApprox(Math.abs(s),b)}${miss?" *":""}`:"—";
+    const valCls=cls==="net"?(s>=0?"pos":"neg"):"";
+    return `<div class="stat ${cls==="net"?"":cls}"><div class="lbl">${lbl}</div><div class="val mono ${valCls}">${val}</div>${mixed?`<div class="stat-native mono">${nativeTxt(m)}</div>`:""}</div>`;
+  };
   const fixeds=entries.filter(e=>e.type==="fixed").sort((a,b)=>(+a.day||1)-(+b.day||1));
   const todayD=+today().slice(8,10);
   // ——— proyección de fin de mes (honesta): los fijos pendientes se suman tal
@@ -1640,9 +1679,9 @@ function renderMes(){
       <button class="mes-arrow" onclick="shiftMes(1)" ${isCurrent?'disabled':''} title="Mes siguiente">›</button>
     </div>
     <div class="totals tri">
-      <div class="stat returned"><div class="lbl">Gastado</div><div class="val">${currencyHTML(out)}</div>${showApx?apx(co.s,co.miss>0):''}</div>
-      <div class="stat collected"><div class="lbl">Ingresado</div><div class="val">${currencyHTML(inn)}</div>${showApx?apx(ci.s,ci.miss>0):''}</div>
-      <div class="stat"><div class="lbl">Neto del mes</div><div class="val">${netHTML(net)}</div>${showApx?apx(ci.s-co.s,(co.miss+ci.miss)>0):''}</div>
+      ${statCard("returned","Gastado",out,co.s,co.miss>0)}
+      ${statCard("collected","Ingresado",inn,ci.s,ci.miss>0)}
+      ${statCard("net","Neto del mes",net,ci.s-co.s,(co.miss+ci.miss)>0)}
     </div>
     ${projHTML}
     ${budHTML}
@@ -1706,11 +1745,23 @@ function renderMes(){
       <button class="quick" onclick="openGoal()" style="text-align:center;width:100%">🎯 o crea una meta de ahorro</button></div>`;
     return;
   }
-  // movimientos SOLO del mes que estás viendo (navega con ‹ ›)
-  const monthMoves=[...mm].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.id>a.id?1:-1));
-  let html=`<div class="group-lbl">Movimientos de ${monthName.toLowerCase()}</div>`;
-  if(!monthMoves.length) html+=`<div class="empty">Sin movimientos en ${monthName.toLowerCase()}. Usa ‹ para ver meses anteriores.</div>`;
-  monthMoves.forEach(e=>{
+  // buscador: visible cuando hay algo que buscar; con búsqueda activa se
+  // muestran resultados de TODOS los meses y se ocultan metas/fijos
+  const mtb=document.getElementById("mesToolbar");
+  if(mtb) mtb.style.display = moves.length>=4 ? "" : "none";
+  const q=(mesQuery||"").trim().toLowerCase();
+  const searching=q.length>0;
+  const listMoves=(searching ? moves.filter(e=>(e.party||"").toLowerCase().includes(q)) : [...mm])
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.id>a.id?1:-1));
+  let html=`<div class="group-lbl">${searching?`Resultados · ${listMoves.length}`:`Movimientos de ${monthName.toLowerCase()}`}</div>`;
+  if(!listMoves.length) html+=`<div class="empty">${searching?"Nada coincide con «"+esc(q)+"».":"Sin movimientos en "+monthName.toLowerCase()+". Usa ‹ para ver meses anteriores."}</div>`;
+  let lastYm="";
+  listMoves.forEach(e=>{
+    if(searching){
+      const eym=(e.date||"").slice(0,7);
+      if(eym!==lastYm){ lastYm=eym; const [y,mo]=eym.split("-");
+        html+=`<div class="group-lbl">${MONTHS[+mo-1]} '${y.slice(2)}</div>`; }
+    }
     const sign=e.type==="expense"?"−":"+";
     html+=`<div class="mv ${e.type}">
       <button class="mv-ico" onclick="editEmoji('${e.id}')" title="Cambiar emoji">${e.emoji||(e.type==="expense"?"↓":"↑")}</button>
@@ -1725,7 +1776,7 @@ function renderMes(){
       <button class="pay-del" onclick="delEntry('${e.id}')">×</button>
     </div>`;
   });
-  listEl.innerHTML=goalsSection+fixedSection+html;
+  listEl.innerHTML=(searching?"":goalsSection+fixedSection)+html;
   if(isCurrent){ drawMesChart(moves); drawNetChart(moves); }
 }
 // punto rojo en la pestaña Mi mes cuando hay fijos vencidos sin pagar
@@ -2187,7 +2238,7 @@ async function toggleTheme(){ // el botón abre el selector de temas
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v36";
+const APP_VERSION = "v37";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
