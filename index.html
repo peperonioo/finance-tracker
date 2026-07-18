@@ -451,6 +451,35 @@
   /* iconografía consistente: mismos tamaños de glifo en todas las filas */
   .pay-del{font-size:15px;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;line-height:1}
   .edit-btn .ed{font-size:10.5px;opacity:.75}
+
+  /* ═══════════ v38: héroe del mes · menos texto · micro-animaciones ═══════════ */
+  .mes-hero{margin-bottom:10px}
+  .mes-neto{font-size:34px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+  .mes-neto.pos{color:var(--green)}
+  .mes-neto.neg{color:var(--red)}
+  .proj-line{font-size:11px;color:var(--dim);margin-top:9px;line-height:1.5}
+  .proj-line .proj-out{color:var(--warn);font-weight:700}
+  .proj-line .proj-pos{color:var(--green);font-weight:700}
+  .proj-line .proj-neg{color:var(--red);font-weight:700}
+  /* leyenda de gráfico con puntos de color (menos texto) */
+  .cdot{display:inline-block;width:7px;height:7px;border-radius:2px;vertical-align:0}
+  .cdot.out{background:var(--red)}
+  .cdot.inn{background:var(--green)}
+  /* transición al cambiar de pestaña */
+  @keyframes tabIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .tab-anim{animation:tabIn .28s cubic-bezier(.2,.7,.3,1) both}
+  /* las barras de los gráficos crecen desde la base */
+  @keyframes barUp{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+  .chart rect:not(.hit){transform-box:fill-box;transform-origin:bottom;animation:barUp .5s cubic-bezier(.2,.7,.3,1) both}
+  /* presupuesto y metas: la barra se llena al aparecer */
+  @keyframes barW{from{width:0}}
+  .budget-bar .fill,.goal-bar > div{animation:barW .6s cubic-bezier(.2,.7,.3,1) both}
+  /* el punto rojo de vencidos late suavemente */
+  @keyframes dotPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.65}}
+  .tab-dot{animation:dotPulse 2s ease-in-out infinite}
+  /* respuesta táctil al presionar filas y tarjetas */
+  .mv,.goal,.card,.stat{transition:transform .12s ease}
+  .mv:active,.goal:active,.card:active{transform:scale(.988)}
 </style>
 </head>
 <body>
@@ -484,7 +513,7 @@
     <button class="btn ghost" onclick="openNew('sale')">+ Venta</button>
     <button class="btn ghost" onclick="openNew('debt')">+ Deuda</button>
   </div>
-  <button class="btn ghost wide" onclick="openImport()">✨ Importar de texto o foto</button>
+  <button class="btn ghost wide" onclick="openImport()">✨ Importar</button>
 </div>
 
 <div id="tab-mes" style="display:none">
@@ -499,16 +528,16 @@
   </div>
 </div>
 
-<button class="btn ghost wide" onclick="openSync()"><span id="syncBadge">☁︎ Sincronizar en la nube</span></button>
+<button class="btn ghost wide" onclick="openSync()"><span id="syncBadge">☁︎ Sincronizar</span></button>
 
 <div class="backup">
-  <button class="lnk" onclick="shareData()">⬇︎ Guardar copia</button>
+  <button class="lnk" onclick="shareData()">⬇︎ Copia</button>
   <span class="sep">·</span>
-  <label class="lnk">↑ Restaurar copia
+  <label class="lnk">↑ Restaurar
     <input type="file" accept="application/json,.json" onchange="importData(this)" hidden>
   </label>
   <span class="sep">·</span>
-  <button class="lnk" onclick="startEmpty()">⌀ Empezar vacío</button>
+  <button class="lnk" onclick="startEmpty()">⌀ Vaciar</button>
 </div>
 <div id="backupHint" class="backup-hint"></div>
 
@@ -1144,7 +1173,7 @@ function render(intro){
     <div class="hero"${inAnim(0)}>
       <div class="hero-lbl">Neto · me deben − debo</div>
       <div class="hero-val">${netHTML(net)}</div>
-      ${hasChart ? `<div class="chart-lbl">Cobrado · últimos 6 meses (${domCur}) · toca una barra</div>${chartSVG(series)}<div id="chartTip" class="chart-tip"></div>` : ``}
+      ${hasChart ? `<div class="chart-lbl">Cobrado · 6 meses (${domCur})</div>${chartSVG(series)}<div id="chartTip" class="chart-tip"></div>` : ``}
     </div>
     <div class="group-lbl">Ventas</div>
     <div class="totals tri">
@@ -1652,10 +1681,16 @@ function renderMes(){
   const projOut=co.s + pendFixedOut + (varOut/Math.max(1,todayD))*(daysInMonth-todayD);
   const projNet=(ci.s+pendFixedIn)-projOut;
   const hasMonthData=mm.length>0 || fixeds.length>0;
-  const projHTML = (isCurrent && hasMonthData) ? `
-    <div class="proj">📈 Día ${todayD}/${daysInMonth} · a este ritmo cerrarás el mes:
-      gasto <span class="mono proj-out">≈ ${moneyApprox(projOut,b)}</span> ·
-      neto <span class="mono ${projNet>=0?'proj-pos':'proj-neg'}">≈ ${(projNet<0?"−":"")+moneyApprox(Math.abs(projNet),b)}</span>${projMiss?" *":""}</div>` : "";
+  // proyección compacta (una línea, dentro del héroe)
+  const projLine = (isCurrent && hasMonthData) ? `
+    <div class="proj-line">📈 Día ${todayD}/${daysInMonth} · cierre:
+      <span class="mono proj-out">≈ ${moneyApprox(projOut,b)}</span> gasto ·
+      <span class="mono ${projNet>=0?'proj-pos':'proj-neg'}">≈ ${(projNet<0?"−":"")+moneyApprox(Math.abs(projNet),b)}</span> neto${projMiss?" *":""}</div>` : "";
+  // héroe: el Neto del mes como único número grande
+  const netS=ci.s-co.s;
+  const netHas=Object.keys(net).some(c=>Math.round(net[c])!==0);
+  const netMixed=netHas&&Object.keys(net).some(c=>c!==b);
+  const netVal=netHas?`${netMixed?"≈ ":""}${netS<0?"−":""}${moneyApprox(Math.abs(netS),b)}${(co.miss+ci.miss)>0?" *":""}`:"—";
   // ——— presupuesto mensual: barra con estado y marcador de proyección ———
   const bud=getBudget();
   let budHTML="";
@@ -1678,16 +1713,20 @@ function renderMes(){
       <span class="mes-title">${monthName} ${viewDate.getFullYear()}</span>
       <button class="mes-arrow" onclick="shiftMes(1)" ${isCurrent?'disabled':''} title="Mes siguiente">›</button>
     </div>
-    <div class="totals tri">
-      ${statCard("returned","Gastado",out,co.s,co.miss>0)}
-      ${statCard("collected","Ingresado",inn,ci.s,ci.miss>0)}
-      ${statCard("net","Neto del mes",net,ci.s-co.s,(co.miss+ci.miss)>0)}
+    <div class="hero mes-hero">
+      <div class="hero-lbl">Neto de ${monthName.toLowerCase()}</div>
+      <div class="mes-neto mono ${netS>=0?'pos':'neg'}">${netVal}</div>
+      ${netMixed?`<div class="stat-native mono">${nativeTxt(net)}</div>`:""}
+      ${projLine}
     </div>
-    ${projHTML}
+    <div class="totals">
+      ${statCard("returned","Gastos",out,co.s,co.miss>0)}
+      ${statCard("collected","Ingresos",inn,ci.s,ci.miss>0)}
+    </div>
     ${budHTML}
-    <button class="cur-edit" onclick="changeBaseCur()" title="La moneda en la que se calculan los ≈ aproximados">Moneda base: ${b} ✎</button>
-    ${(moves.length && isCurrent) ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl">Gastado vs ingresado · últimos 6 meses (${anyForeign?'≈ ':''}${b})</div><svg id="mesChart" class="chart"></svg></div>
-    <div class="hero" style="margin-top:10px"><div class="chart-lbl">Neto acumulado (${anyForeign?'≈ ':''}${b})</div><svg id="netChart" class="chart"></svg></div>` : ``}`;
+    <button class="cur-edit" onclick="changeBaseCur()" title="La moneda en la que se calculan los ≈ aproximados">≈ en ${b} ✎</button>
+    ${(moves.length && isCurrent) ? `<div class="hero" style="margin-top:10px"><div class="chart-lbl"><span class="cdot out"></span> gastos · <span class="cdot inn"></span> ingresos · 6 meses ${anyForeign?'≈':''}${b}</div><svg id="mesChart" class="chart"></svg></div>
+    <div class="hero" style="margin-top:10px"><div class="chart-lbl">Neto acumulado · ${anyForeign?'≈':''}${b}</div><svg id="netChart" class="chart"></svg></div>` : ``}`;
   // punto rojo de la pestaña: SIEMPRE contra el mes real de hoy (no el navegado)
   const ymNow=today().slice(0,7);
   let overdueCount=0;
@@ -1855,6 +1894,17 @@ function drawNetChart(moves){
     `<circle class="netdot" cx="${X(pts.length-1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="3.5"></circle>`+
     `<text class="netlbl" x="${lblX.toFixed(1)}" y="${Math.max(top-2,Y(last)-8).toFixed(1)}" text-anchor="end">${lastLbl}</text>`+
     buckets.map((bkt,i)=>`<text x="${X(i).toFixed(1)}" y="${H-5}" text-anchor="middle">${bkt.label}</text>`).join("");
+  // la línea se "dibuja" de izquierda a derecha (respeta reduced-motion)
+  if(!matchMedia("(prefers-reduced-motion: reduce)").matches){
+    const pl=svg.querySelector(".netline");
+    try{
+      const len=pl.getTotalLength();
+      pl.style.strokeDasharray=len; pl.style.strokeDashoffset=len;
+      pl.getBoundingClientRect(); // reflow
+      pl.style.transition="stroke-dashoffset .8s cubic-bezier(.3,.7,.3,1)";
+      pl.style.strokeDashoffset="0";
+    }catch(e){}
+  }
 }
 /* pestañas */
 let curTab = "cuentas";
@@ -1868,6 +1918,9 @@ function switchTab(t){
   const ind=document.getElementById("tabInd");
   if(ind) ind.style.transform = t==="mes" ? "translateX(100%)" : "translateX(0)";
   if(t==="mes") renderMes(); else drawChart(); // el gráfico se mide al hacerse visible
+  // entrada suave del contenido de la pestaña
+  const shown=document.getElementById(t==="mes"?"tab-mes":"tab-cuentas");
+  if(shown){ shown.classList.remove("tab-anim"); void shown.offsetWidth; shown.classList.add("tab-anim"); }
 }
 
 /* copia de seguridad */
@@ -1887,7 +1940,7 @@ function markBackedUp(){
 function updateBackupHint(){
   const el = document.getElementById("backupHint"); if(!el) return;
   const lb = +Store.get("last_backup") || 0;
-  if(!lb){ el.innerHTML = `<span class="warn">⚠︎ Aún no has guardado ninguna copia — hazlo para no perder tus datos</span>`; return; }
+  if(!lb){ el.innerHTML = `<span class="warn">⚠︎ Sin copia de seguridad aún</span>`; return; }
   const dirty = Store.get("backup_hash") !== hashEntries();
   const d = new Date(lb);
   const when = `${d.getDate()}/${d.getMonth()+1}/${String(d.getFullYear()).slice(2)}`;
@@ -2162,7 +2215,7 @@ function scheduleSync(){ if(!syncConfigured()) return; clearTimeout(syncTimer); 
 function setSyncStatus(t){ const el=document.getElementById("sync_status"); if(el) el.textContent=t; }
 function updateSyncBadge(){
   const el=document.getElementById("syncBadge"); if(!el) return;
-  if(!syncConfigured()){ el.textContent="☁︎ Sincronizar en la nube"; return; }
+  if(!syncConfigured()){ el.textContent="☁︎ Sincronizar"; return; }
   if(!navigator.onLine){ el.textContent="☁︎ Sin conexión · se sincronizará al volver"; return; }
   const t=+Store.get("sync_time")||0;
   el.textContent = t ? "☁︎ Sincronizado "+relTime(t) : "☁︎ Nube · pulsa para sincronizar";
@@ -2238,7 +2291,7 @@ async function toggleTheme(){ // el botón abre el selector de temas
 function initTheme(){ applyTheme(document.documentElement.getAttribute("data-theme") || "dark"); }
 
 // versión visible en la cabecera (subir junto con CACHE_VERSION en sw.js)
-const APP_VERSION = "v37";
+const APP_VERSION = "v38";
 document.getElementById("ver").textContent = APP_VERSION;
 initTheme();
 switchTab(Store.get("tab")==="mes" ? "mes" : "cuentas"); // restaura la última pestaña
